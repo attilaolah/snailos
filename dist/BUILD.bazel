@@ -6,9 +6,12 @@ webpack_bundle(
     name = "dist",
     srcs = [
         "//src",
+        # TODO:
+        #"//src/css:style",
     ] + [
         # deps, keep sorted
         "//:node_modules/normalize.css",
+        "//:node_modules/xterm",
     ],
     entry_point = ":entry_point",
     node_modules = "//:node_modules",

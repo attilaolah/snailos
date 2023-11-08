@@ -13,10 +13,21 @@
 // Bazel --compilation_mode (-c) flag.
 const COMPILATION_MODE = "${COMPILATION_MODE}";
 
+// OS runtime.
 import * as wasm from "../src/src_bg.wasm";
-import { __wbg_set_wasm } from "../src/src_bg.js";
+import { SnailOs, __wbg_set_wasm } from "../src/src_bg.js";
 __wbg_set_wasm(wasm);
 export * from "../src/src_bg.js";
 
-// Start the binary.
-wasm.__wbindgen_start();
+// Dependencies, injected.
+import { Terminal } from "xterm/lib/xterm.js";
+
+const os = new SnailOs({
+  term: new Terminal(),
+});
+
+if (COMPILATION_MODE !== "opt") {
+  window.os = os;
+}
+
+os.run();

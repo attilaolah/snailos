@@ -1,5 +1,5 @@
 {
-  "checksum": "2c3c9d4e50a8d8ecaf534a10db69cae812d2e45449639d40dd78e5c1a3135934",
+  "checksum": "4819c36d9eab49c542262ea7feeed884bde1de7050bb8e6a73354bd1583b5310",
   "crates": {
     "addr2line 0.21.0": {
       "name": "addr2line",
@@ -8828,9 +8828,13 @@
         ],
         "crate_features": {
           "common": [
+            "Document",
+            "Element",
             "Event",
             "EventTarget",
             "MessageEvent",
+            "Node",
+            "Window",
             "Worker",
             "console"
           ],
