@@ -1,0 +1,3 @@
+common --enable_bzlmod
+build --@rules_rust//:extra_rustc_flag=--cfg=web_sys_unstable_apis
+test --test_output=errors
