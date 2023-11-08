@@ -3,7 +3,8 @@ load("@rules_rust//rust:defs.bzl", "rust_shared_library")
 load("@rules_rust//wasm_bindgen:wasm_bindgen.bzl", "rust_wasm_bindgen")
 
 rust_wasm_bindgen(
-    name = "runtime",
+    name = "src",
+    visibility = ["//dist:__pkg__"],
     wasm_file = ":lib",
 )
 

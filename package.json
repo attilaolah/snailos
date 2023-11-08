@@ -1,0 +1,13 @@
+{
+  "name": "snailos",
+  "version": "0.0.1",
+  "description": "Snail Operating System",
+  "main": "snailos.js",
+  "author": "Attila Oláh <attilaolah@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "normalize.css": "^8.0.1",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  }
+}
