@@ -6,8 +6,11 @@
   "author": "Attila Oláh <attilaolah@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "normalize.css": "^8.0.1",
+    "normalize.css": "^8.0.1"
+  },
+  "devDependencies": {
     "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4"
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
   }
 }

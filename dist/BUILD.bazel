@@ -1,9 +1,21 @@
-load("@aspect_rules_webpack//webpack:defs.bzl", "webpack_bundle")
+load("@aspect_rules_webpack//webpack:defs.bzl", "webpack_bundle", "webpack_devserver")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//config:compilation_modes.bzl", "COMPILATION_MODES")
 
+webpack_devserver(
+    name = "server",
+    data = [
+        "//:node_modules/normalize.css",
+        "//dist",
+        "//src",
+    ],
+    entry_point = ":entry_point",
+    node_modules = "//:node_modules",
+    webpack_config = "webpack.config.js",
+)
+
 webpack_bundle(
-    name = "snailos",
+    name = "dist",
     srcs = [
         "//:node_modules/normalize.css",
         "//src",
