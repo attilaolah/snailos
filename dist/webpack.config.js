@@ -4,29 +4,27 @@ module.exports = {
   entry: {
     style: [
       "normalize.css/normalize.css",
-    ]
+    ],
   },
   output: {
-    asyncChunks: false,
-    filename: "[name].js",
     module: true,
+    filename: "[name].js",
+    asyncChunks: false,
   },
   experiments: {
     futureDefaults: true,
     outputModule: true,
   },
   module: {
-    rules: [
-      {
-        test: /\.wasm$/,
-        type: "webassembly/async",
-      },
-    ],
+    rules: [{
+      test: /\.wasm$/,
+      type: "webassembly/async",
+    }],
   },
   devServer: {
-    static: {
-      directory: path.join(__dirname, "dist"),
-    },
+    static: [{
+      directory: __dirname,
+    }],
     compress: true,
     port: 8080,
   },
