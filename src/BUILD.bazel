@@ -1,0 +1,15 @@
+load("@rules_rust//wasm_bindgen:wasm_bindgen.bzl", "rust_wasm_bindgen")
+load("@rules_rust//rust:defs.bzl", "rust_shared_library")
+load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
+
+rust_wasm_bindgen(
+    name = "runtime",
+    wasm_file = ":lib",
+)
+
+rust_shared_library(
+    name = "lib",
+    srcs = ["lib.rs"],
+    aliases = aliases(normal = True),
+    deps = all_crate_deps(package_name = "", normal = True),
+)
