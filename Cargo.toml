@@ -15,7 +15,7 @@ lto = true
 
 [dependencies]
 js-sys = "0.3"
-wasm-bindgen = "0.2"
+wasm-bindgen = "=0.2.87"
 wasm-bindgen-futures = "0.4"
 
 [dependencies.web-sys]
