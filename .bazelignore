@@ -1,5 +1,3 @@
-bazel-*
 debug
 node_modules
 target
-**/*.rs.bk

@@ -1,0 +1,42 @@
+load("@aspect_rules_webpack//webpack:defs.bzl", "webpack_bundle", "webpack_devserver")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("//config:compilation_modes.bzl", "COMPILATION_MODES")
+
+webpack_bundle(
+    name = "dist",
+    srcs = [
+        "//src",
+    ] + [
+        # deps, keep sorted
+        "//:node_modules/normalize.css",
+    ],
+    entry_point = ":entry_point",
+    node_modules = "//:node_modules",
+    output_dir = True,
+    webpack_config = "webpack.config.js",
+)
+
+webpack_devserver(
+    name = "server",
+    data = [
+        ":dist",
+        ":html",
+    ],
+    node_modules = "//:node_modules",
+    webpack_config = "webpack.config.js",
+)
+
+expand_template(
+    name = "entry_point",
+    out = "entry_point.js",
+    substitutions = select({
+        "//config:" + mode: {"${COMPILATION_MODE}": mode}
+        for mode in COMPILATION_MODES
+    }),
+    template = "entry_point.js.tpl",
+)
+
+filegroup(
+    name = "html",
+    srcs = ["index.html"],
+)

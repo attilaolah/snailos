@@ -1,0 +1,31 @@
+[package]
+name = "snailos"
+description = "Snail Operating System"
+version = "0.0.1"
+authors = ["Attila Oláh <attilaolah@gmail.com>"]
+categories = ["wasm"]
+readme = "README.md"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+
+[dependencies]
+js-sys = "0.3"
+wasm-bindgen = "=0.2.87"
+wasm-bindgen-futures = "0.4"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "console",
+]
+
+[dev-dependencies]
+console_error_panic_hook = "0.1"
+futures = "0.3"
+wasm-bindgen-test = "0.3"
+wasm-pack = "0.12"
