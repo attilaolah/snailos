@@ -20,7 +20,7 @@ __wbg_set_wasm(wasm);
 export * from "./wasm_bg.js";
 
 // Dependencies, injected.
-import { Terminal } from "xterm/lib/xterm.js";
+import { Terminal } from "xterm";
 
 const os = new SnailOs({
   term: new Terminal(),
