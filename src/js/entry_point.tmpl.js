@@ -1,5 +1,4 @@
-/* vi: ft=javascript
- *
+/*
  * Webpack entry point.
  *
  * This file lists the other files in the order in which they need to be
