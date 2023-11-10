@@ -15,19 +15,16 @@ const COMPILATION_MODE = "${COMPILATION_MODE}";
 
 // OS runtime.
 import * as wasm from "./wasm_bg.wasm";
-import { SnailOs, __wbg_set_wasm } from "./wasm_bg.js";
+import { main, __wbg_set_wasm } from "./wasm_bg.js";
 __wbg_set_wasm(wasm);
 export * from "./wasm_bg.js";
 
 // Dependencies, injected.
 import { Terminal } from "xterm";
+import { FitAddon } from 'xterm-addon-fit';
 
-const os = new SnailOs({
+main({
   term: new Terminal(),
+  term_fit_addon: new FitAddon(),
+  compilation_mode: COMPILATION_MODE,
 });
-
-if (COMPILATION_MODE !== "opt") {
-  window.os = os;
-}
-
-os.run();

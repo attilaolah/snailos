@@ -5,16 +5,16 @@ use crate::term::Terminal;
 
 mod term;
 
-#[wasm_bindgen]
 pub struct SnailOs {
     term: Terminal,
 }
 
-#[wasm_bindgen]
 impl SnailOs {
-    #[wasm_bindgen(constructor)]
     pub fn new(config: JsValue) -> Result<SnailOs, Error> {
-        let term = Terminal::new(Reflect::get(&config, &"term".into())?);
+        let term = Terminal::new(
+            Reflect::get(&config, &"term".into())?,
+            Reflect::get(&config, &"term_fit_addon".into())?,
+        );
         Ok(Self { term })
     }
 
@@ -24,4 +24,11 @@ impl SnailOs {
 
         Ok(())
     }
+}
+
+#[wasm_bindgen]
+pub fn main(config: JsValue) -> Result<(), Error> {
+    SnailOs::new(config)?.run()?;
+
+    Ok(())
 }
