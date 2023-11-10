@@ -1,5 +1,0 @@
-filegroup(
-    name = "style",
-    srcs = ["style.css"],
-    visibility = ["//dist:__pkg__"],
-)

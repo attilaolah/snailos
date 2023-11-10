@@ -1,4 +1,5 @@
-/*
+/* vi: ft=javascript
+ *
  * Webpack entry point.
  *
  * This file lists the other files in the order in which they need to be
@@ -14,10 +15,10 @@
 const COMPILATION_MODE = "${COMPILATION_MODE}";
 
 // OS runtime.
-import * as wasm from "../src/src_bg.wasm";
-import { SnailOs, __wbg_set_wasm } from "../src/src_bg.js";
+import * as wasm from "./wasm_bg.wasm";
+import { SnailOs, __wbg_set_wasm } from "./wasm_bg.js";
 __wbg_set_wasm(wasm);
-export * from "../src/src_bg.js";
+export * from "./wasm_bg.js";
 
 // Dependencies, injected.
 import { Terminal } from "xterm/lib/xterm.js";

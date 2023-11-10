@@ -5,7 +5,7 @@ module.exports = {
     style: [
       "normalize.css/normalize.css",
       "xterm/css/xterm.css",
-      //"../src/css/style.css",
+      "./src/css/style.css",
     ],
   },
   output: {
