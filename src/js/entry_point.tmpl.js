@@ -13,10 +13,18 @@
 // Bazel --compilation_mode (-c) flag.
 const COMPILATION_MODE = "${COMPILATION_MODE}";
 
-import * as wasm from "../src/src_bg.wasm";
-import { __wbg_set_wasm } from "../src/src_bg.js";
+// OS runtime.
+import * as wasm from "./wasm_bg.wasm";
+import { main, __wbg_set_wasm } from "./wasm_bg.js";
 __wbg_set_wasm(wasm);
-export * from "../src/src_bg.js";
+export * from "./wasm_bg.js";
 
-// Start the binary.
-wasm.__wbindgen_start();
+// Dependencies, injected.
+import { Terminal } from "xterm";
+import { FitAddon } from 'xterm-addon-fit';
+
+main({
+  term: new Terminal(),
+  term_fit_addon: new FitAddon(),
+  compilation_mode: COMPILATION_MODE,
+});

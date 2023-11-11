@@ -1,0 +1,8 @@
+html, body, #term {
+  background: black;
+  overflow: hidden;
+}
+
+#term {
+  height: 100vh;
+}

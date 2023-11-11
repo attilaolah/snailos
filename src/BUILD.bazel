@@ -1,19 +1,77 @@
+load("@aspect_rules_webpack//webpack:defs.bzl", "webpack_bundle", "webpack_devserver")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_shared_library")
 load("@rules_rust//wasm_bindgen:wasm_bindgen.bzl", "rust_wasm_bindgen")
-
-rust_wasm_bindgen(
-    name = "src",
-    visibility = ["//dist:__pkg__"],
-    wasm_file = ":lib",
-)
+load("//config:compilation_modes.bzl", "COMPILATION_MODES")
 
 rust_shared_library(
     name = "lib",
-    srcs = ["lib.rs"],
+    srcs = [
+        "lib.rs",
+        "term.rs",
+    ],
     aliases = aliases(normal = True),
     deps = all_crate_deps(
         package_name = "",
         normal = True,
     ),
+)
+
+rust_wasm_bindgen(
+    name = "wasm",
+    wasm_file = ":lib",
+)
+
+webpack_bundle(
+    name = "bundle",
+    srcs = [
+        ":css",
+        ":wasm",
+    ] + [
+        # deps, keep sorted
+        "//:node_modules/normalize.css",
+        "//:node_modules/xterm",
+        "//:node_modules/xterm-addon-fit",
+    ],
+    entry_point = ":entry_point",
+    node_modules = "//:node_modules",
+    output_dir = True,
+    webpack_config = "webpack.config.js",
+)
+
+webpack_devserver(
+    name = "server",
+    data = [
+        ":bundle",
+        ":css",
+        ":index",
+    ],
+    node_modules = "//:node_modules",
+    webpack_config = "webpack.config.js",
+)
+
+expand_template(
+    name = "index",
+    out = "index.html",
+    substitutions = {
+        "${URL_CSS}": "bundle/style.css",
+        "${URL_JS}": "bundle/bundle.js",
+    },
+    template = "html/index.tmpl.html",
+)
+
+expand_template(
+    name = "entry_point",
+    out = "entry_point.js",
+    substitutions = select({
+        "//config:" + mode: {"${COMPILATION_MODE}": mode}
+        for mode in COMPILATION_MODES
+    }),
+    template = "js/entry_point.tmpl.js",
+)
+
+filegroup(
+    name = "css",
+    srcs = ["css/style.css"],
 )
