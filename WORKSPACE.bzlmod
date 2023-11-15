@@ -12,8 +12,8 @@ load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
 load("@rules_rust//wasm_bindgen:repositories.bzl", "rust_wasm_bindgen_repositories")
 
 nixpkgs_cc_configure(
-  repository = "@nixpkgs",
-  attribute_path = "clang_16",
+    attribute_path = "clang_16",
+    repository = "@nixpkgs",
 )
 
 rules_rust_dependencies()
