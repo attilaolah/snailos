@@ -1,6 +1,8 @@
 bazel_dep(name = "aspect_rules_js", version = "1.33.1")
 bazel_dep(name = "aspect_rules_webpack", version = "0.13.0")
 bazel_dep(name = "bazel_skylib", version = "1.5.0")
+bazel_dep(name = "rules_nixpkgs_cc", version = "0.10.0")
+bazel_dep(name = "rules_nixpkgs_core", version = "0.10.0")
 
 npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
 npm.npm_translate_lock(
@@ -8,3 +10,18 @@ npm.npm_translate_lock(
     pnpm_lock = "//:pnpm-lock.yaml",
 )
 use_repo(npm, "npm")
+
+archive_override(
+    module_name = "rules_nixpkgs_cc",
+    integrity = "sha256-mA7fzu8uWeESLZvmxSQTvCmENfCj1FJTK4pI11Yv/Wc=",
+    strip_prefix = "rules_nixpkgs-0.10.0/toolchains/cc",
+    urls = ["https://github.com/tweag/rules_nixpkgs/releases/download/v0.10.0/rules_nixpkgs-0.10.0.tar.gz"],
+)
+
+nix_repo = use_extension("@rules_nixpkgs_core//extensions:repository.bzl", "nix_repo")
+nix_repo.github(
+    name = "nixpkgs",
+    sha256 = "f2b96094f6dfbb53b082fe8709da94137475fcfead16c960f2395c98fc014b68",
+    tag = "23.05",
+)
+use_repo(nix_repo, "nixpkgs")
