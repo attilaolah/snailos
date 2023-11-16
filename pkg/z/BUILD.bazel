@@ -1,0 +1,8 @@
+load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
+
+configure_make(
+    name = "z",
+    configure_options = ["--static"],
+    lib_source = "@z_src//:all",
+    out_static_libs = ["libz.a"],
+)

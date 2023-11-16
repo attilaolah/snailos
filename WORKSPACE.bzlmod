@@ -1,8 +1,20 @@
-workspace(name = "snailos")
-
+load("@rules_nixpkgs_cc//:cc.bzl", "nixpkgs_cc_configure")
+load("@rules_nixpkgs_cc//:foreign_cc.bzl", "nixpkgs_foreign_cc_configure")
 load("//:workspace.bzl", "workspace_dependencies")
 
+# Needed for @rules_rust.
 workspace_dependencies()
+
+# CC toolchain.
+nixpkgs_cc_configure(
+    attribute_path = "clang_16",
+    repository = "@nixpkgs",
+)
+
+# Foreign CC toolchain.
+nixpkgs_foreign_cc_configure(
+    repository = "@nixpkgs",
+)
 
 load("@rules_rust//bindgen:repositories.bzl", "rust_bindgen_dependencies", "rust_bindgen_register_toolchains")
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
