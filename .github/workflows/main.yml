@@ -1,0 +1,49 @@
+name: Ubuntu 22.04
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  workflow_dispatch:
+
+jobs:
+  Bazel:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cache/bazel
+          ~/.cache/bazelisk
+        key: Bazel-${{ hashFiles('WORKSPACE.bzlmod', '**/*.bazel', '**/*.bzl') }}
+        restore-keys: Bazel-
+    - run: bazel query //...
+    - run: bazel build --nobuild //...
+    - run: bazel build //...
+
+  Rust:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/cache@v2
+      with:
+        path: target
+        key: Rust-${{ hashFiles('Cargo.*') }}
+        restore-keys: Rust-
+    - run: cargo build --verbose
+    - run: cargo test --verbose
+
+  Node:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/cache@v2
+      with:
+        path: node_modules
+        key: Node-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+        restore-keys: Node-
+    - uses: pnpm/action-setup@v2.4.0
+    - run: pnpm install
