@@ -18,8 +18,8 @@ jobs:
         path: |
           ~/.cache/bazel
           ~/.cache/bazelisk
-        key: ${{ runner.os }}-bazel-${{ hashFiles('WORKSPACE.bzlmod', '**/*.bazel', '**/*.bzl') }}
-        restore-keys: ${{ runner.os }}-bazel-
+        key: ${{ runner.os }}-{{ job.name }}-${{ hashFiles('WORKSPACE.bzlmod', '**/*.bazel', '**/*.bzl') }}
+        restore-keys: ${{ runner.os }}-{{ job.name }}-
     - run: bazel query //...
     - run: bazel build --nobuild //...
     - run: bazel build //...
