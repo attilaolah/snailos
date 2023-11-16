@@ -1,0 +1,53 @@
+name: Ubuntu 22.04
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  workflow_dispatch:
+
+jobs:
+  Bazel:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cache/bazel
+          ~/.cache/bazelisk
+        key: ${{ runner.os }}-bazel-${{ hashFiles('WORKSPACE.bzlmod', '**/*.bazel', '**/*.bzl') }}
+        restore-keys: ${{ runner.os }}-bazel-
+    - name: Query
+      run: bazel query //...
+    - name: Build (dry-run)
+      run: bazel build --nobuild //...
+    - name: Build (except //pkg/...)
+      run: bazel build -- //... -//pkg/...
+
+  Rust:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/cache@v2
+      with:
+        path: target
+        key: ${{ runner.os }}-rust-${{ hashFiles('Cargo.*') }}
+        restore-keys: ${{ runner.os }}-rust-
+    - name: Build
+      run: cargo build --verbose
+    - name: Test
+      run: cargo test --verbose
+
+  Node:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v2
+      with:
+        node-version: '18'
+        cache: 'npm'
+    - name: Install
+      run: npm install
