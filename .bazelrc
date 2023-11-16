@@ -6,8 +6,14 @@ common --enable_bzlmod
 common --incompatible_enable_cc_toolchain_resolution
 common --action_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 
-# Use the host toolchain provided by rules_nixpkgs.
+# Use the host toolchain provided by @rules_nixpkgs.
 build --host_platform=@rules_nixpkgs_core//platforms:host
+
+# Prefer the Foreign CC toolchains provided by @rules_nixpkgs_cc.
+build --extra_toolchains=@nixpkgs_foreign_cc_toolchain//:all
+
+# Prefer the preinstalled pkg-config toolchain over the built one.
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
 
 # Enable Rust experimental flags for web_sys.
 build --@rules_rust//:extra_rustc_flag=--cfg=web_sys_unstable_apis
