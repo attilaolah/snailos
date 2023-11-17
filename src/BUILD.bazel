@@ -1,3 +1,4 @@
+load("//pkg:wasm_binaries.bzl", "wasm_binaries")
 load("@aspect_rules_webpack//webpack:defs.bzl", "webpack_bundle", "webpack_devserver")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
@@ -43,6 +44,7 @@ webpack_bundle(
 webpack_devserver(
     name = "server",
     data = [
+        ":bin",
         ":bundle",
         ":css",
         ":index",
@@ -74,4 +76,9 @@ expand_template(
 filegroup(
     name = "css",
     srcs = ["css/style.css"],
+)
+
+wasm_binaries(
+    name = "bin",
+    srcs = ["//pkg/busybox:bin"],
 )

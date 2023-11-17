@@ -2,6 +2,8 @@ use js_sys::Error;
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use web_sys::window;
 
+const CRLF: &str = "\r\n";
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = Terminal)]
@@ -33,7 +35,10 @@ impl Terminal {
         let term: JsTerm = term.into();
         let term_fit_addon: JsFitAddon = term_fit_addon.into();
         term.load_addon(&term_fit_addon);
-        Self { term, term_fit_addon }
+        Self {
+            term,
+            term_fit_addon,
+        }
     }
 
     pub fn open(&self) -> Result<(), Error> {
@@ -57,5 +62,10 @@ impl Terminal {
         self.term.write(&text.into(), JsValue::undefined());
 
         Ok(())
+    }
+
+    pub fn writeln(&self, text: &str) -> Result<(), Error> {
+        self.write(text)?;
+        self.write(CRLF)
     }
 }

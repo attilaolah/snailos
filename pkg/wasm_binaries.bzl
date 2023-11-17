@@ -14,7 +14,7 @@ def _wasm_binaries_impl(ctx):
             continue
         if not (src.basename.endswith(".js") or src.basename.endswith(".wasm")):
             continue
-        if len(src.dirname.partition("/bin/pkg/")[-1].split("/")) != 3:
+        if len(src.dirname.partition("/bin/pkg/")[-1].split("/")) > 3:
             continue  # expected: pkg_name/rule_name/bin
         inputs.append(src)
 

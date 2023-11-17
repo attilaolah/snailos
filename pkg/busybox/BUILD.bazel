@@ -24,6 +24,11 @@ EM_ARGS = {
     "OBJCOPY": "${EMSCRIPTEN}/../bin/llvm-objcopy",
     "OBJDUMP": "${EMSCRIPTEN}/../bin/llvm-objdump",
     "SKIP_STRIP": "y",
+    "CFLAGS_busybox": '"{}"'.format(" ".join([
+        "-sEXPORT_ES6",
+        "-sMODULARIZE",
+        "-sWASM_BIGINT",
+    ])),
 }
 
 configure_make(
