@@ -1,5 +1,32 @@
 load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
+load(":busybox_config.bzl", "busybox_config")
 
+# Absolute minimum configuration.
+# This builds an empty BusyBox that prints "no applets enabled".
+busybox_config(
+    name = "empty",
+    base = ":all_no",
+    remove = [
+        "install_applet_symlinks",
+        "sh_is_ash",
+        "shell_ash",
+    ],
+    values = {
+        "install_applet_dont": "y",
+        "sh_is_none": "y",
+    },
+)
+
+# Portable configuration.
+# Removes some GCC-specific flags.
+busybox_config(
+    name = "portable",
+    base = ":empty",
+    values = {"use_portable_code": "y"},
+)
+
+# BusyBox's default "allnoconfig" output.
+# This still builds the Almquist shell and installs it as a symlink.
 configure_make(
     name = "all_no",
     args = ["HOSTCC=cc"],
@@ -12,5 +39,4 @@ configure_make(
     out_headers_only = True,
     postfix_script = "cp .config ${INSTALLDIR}/config/all_no.conf",
     targets = ["allnoconfig"],
-    visibility = ["//pkg/busybox:__pkg__"],
 )
