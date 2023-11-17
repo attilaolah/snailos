@@ -1,16 +1,46 @@
-load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
+load("//pkg:emscripten_foreign_cc.bzl", "configure_make", "keyval")
+
+ARGS = {
+    "HOSTCC": "cc",
+    "HOSTCXX": "c++",
+}
+
+K8_ARGS = {
+    "CC": "cc",
+}
+
+EM_ARGS = {
+    "AR": "${EMSCRIPTEN}/emar",
+    "AS": "false",  # refuse to assemble
+    "CC": "${EMSCRIPTEN}/emcc",
+    "NM": "${EMSCRIPTEN}/emnm",
+    "OBJCOPY": "${EMSCRIPTEN}/../bin/llvm-objcopy",
+    "OBJDUMP": "${EMSCRIPTEN}/../bin/llvm-objdump",
+    "SKIP_STRIP": "y",
+}
 
 configure_make(
     name = "empty",
-    args = [
-        "HOSTCC=cc",
-        "HOSTCXX=c++",
-        "CC=cc",  # TODO: Set this from the toolchain somehow.
-    ],
-    build_data = ["//pkg/busybox/config:portable"],
+    args = select({
+        "@platforms//cpu:wasm32": keyval(ARGS, EM_ARGS),
+        "//conditions:default": keyval(ARGS, K8_ARGS),
+    }),
+    build_data = ["//pkg/busybox/config:base"],
     configure_in_place = True,
-    env = {"CONFIG": "$(execpath //pkg/busybox/config:portable)"},
+    env = {"CONFIG": "$(execpath //pkg/busybox/config:base)"},
     lib_source = "@busybox_src//:all",
-    out_binaries = ["busybox"],
-    postfix_script = "cp _install/bin/* ${INSTALLDIR}/bin",
+    out_binaries = select({
+        "@platforms//cpu:wasm32": [
+            "busybox.js",
+            "busybox.wasm",
+        ],
+        "//conditions:default": ["busybox"],
+    }),
+    postfix_script = select({
+        "@platforms//cpu:wasm32": "\n".join([
+            'sed s/busybox_unstripped/busybox/g < _install/bin/busybox > "${INSTALLDIR}/bin/busybox.js"',
+            'cp busybox_unstripped.wasm "${INSTALLDIR}/bin/busybox.wasm"',
+        ]),
+        "//conditions:default": "cp _install/bin/* ${INSTALLDIR}/bin",
+    }),
 )

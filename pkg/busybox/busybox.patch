@@ -1,5 +1,6 @@
 diff --git configure configure
 new file mode 100755
+index 000000000..f056085d1
 --- /dev/null
 +++ configure
 @@ -0,0 +1,5 @@
@@ -8,3 +9,24 @@ new file mode 100755
 +# We have a prepared configuration, copy it to where it is expected.
 +# If no configuration is present, then do nothing, we will likely generate it.
 +[ -n "${CONFIG}" ] && cp "${CONFIG}" .config || true
+diff --git scripts/trylink scripts/trylink
+index 2255deee7..583ed4af7 100755
+--- scripts/trylink
++++ scripts/trylink
+@@ -96,7 +96,7 @@ fi
+ START_GROUP="-Wl,--start-group"
+ END_GROUP="-Wl,--end-group"
+ INFO_OPTS() {
+-	echo "-Wl,--warn-common -Wl,-Map,$EXE.map -Wl,--verbose"
++	echo "-Wl,-Map,$EXE.map -Wl,--verbose"
+ }
+ 
+ # gold may not support --sort-common (yet)
+@@ -320,7 +320,6 @@ int main(int argc, char **argv)
+ 		$SORT_SECTION \
+ 		$GC_SECTIONS \
+ 		-L"$sharedlib_dir" -lbusybox \
+-		-Wl,--warn-common \
+ 	|| {
+ 	    echo "Linking $EXE failed"
+ 	    cat $EXE.out
