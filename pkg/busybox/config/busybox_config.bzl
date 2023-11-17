@@ -10,7 +10,6 @@ cat $(
 
 IFS=';' read -ra removes <<< "${REMOVE}"
 for config in "${removes[@]}"; do
-  echo REM: $config
   sed -i "s/^${config}=.*/# ${config} is not set/" ${OUT}
 done
 
@@ -18,9 +17,7 @@ IFS=';' read -ra replacements <<< "${REPLACE}"
 for replacement in "${replacements[@]}"; do
   config="${replacement%=*}"
   value="${replacement#*=}"
-  echo REPL: $config $value
-
-  sed -i "s/^# ${config} is not set$/# ${config} is not set/; s/^# ${config} is not set/${config}=${value}/" ${OUT}
+  sed -i "s/^# ${config} is not set$/${config}=${value}/" ${OUT}
 done
 """
 

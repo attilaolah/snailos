@@ -14,4 +14,5 @@ src = src_archive(
     urls = URLS,
     integrity = INTEGRITY,
     strip_prefix = "busybox-{v}",
+    patches = ["//pkg/busybox:busybox.patch"],
 )
