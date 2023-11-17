@@ -1,0 +1,16 @@
+load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
+
+configure_make(
+    name = "all_no",
+    args = ["HOSTCC=cc"],
+    # This is the real reason we can't just use make().
+    configure_in_place = True,
+    # Hack to skip running "configure".
+    configure_prefix = "true",
+    lib_source = "@busybox_src//:all",
+    out_data_dirs = ["config"],
+    out_headers_only = True,
+    postfix_script = "cp .config ${INSTALLDIR}/config/all_no.conf",
+    targets = ["allnoconfig"],
+    visibility = ["//pkg/busybox:__pkg__"],
+)
