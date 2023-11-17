@@ -2,7 +2,19 @@ load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
 
 configure_make(
     name = "z",
+    build_data = [
+        "@emscripten_bin_linux//:all",
+        "@emsdk//emscripten_toolchain:env.sh",
+    ],
     configure_options = ["--static"],
+    configure_prefix = "source $${EMENV} && $${EMSCRIPTEN}/emconfigure",
+    env = {"EMENV": "$(execpath @emsdk//emscripten_toolchain:env.sh)"},
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
     lib_source = "@z_src//:all",
     out_static_libs = ["libz.a"],
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    tool_prefix = "source $${EMENV} && $${EMSCRIPTEN}/emmake",
 )
