@@ -1,0 +1,16 @@
+load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
+
+configure_make(
+    name = "empty",
+    args = [
+        "HOSTCC=cc",
+        "HOSTCXX=c++",
+        "CC=cc",  # TODO: Set this from the toolchain somehow.
+    ],
+    build_data = ["//pkg/busybox/config:portable"],
+    configure_in_place = True,
+    env = {"CONFIG": "$(execpath //pkg/busybox/config:portable)"},
+    lib_source = "@busybox_src//:all",
+    out_binaries = ["busybox"],
+    postfix_script = "cp _install/bin/* ${INSTALLDIR}/bin",
+)

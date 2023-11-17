@@ -23,6 +23,7 @@ busybox_config(
     name = "portable",
     base = ":empty",
     values = {"use_portable_code": "y"},
+    visibility = ["//pkg/busybox:__pkg__"],
 )
 
 # BusyBox's default "allnoconfig" output.
