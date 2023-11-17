@@ -1,0 +1,10 @@
+diff --git configure configure
+new file mode 100755
+--- /dev/null
++++ configure
+@@ -0,0 +1,5 @@
++#!/bin/bash
++
++# We have a prepared configuration, copy it to where it is expected.
++# If no configuration is present, then do nothing, we will likely generate it.
++[ -n "${CONFIG}" ] && cp "${CONFIG}" .config || true
