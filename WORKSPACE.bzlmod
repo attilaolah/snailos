@@ -5,16 +5,32 @@ load("//:workspace.bzl", "workspace_dependencies")
 # Needed for @rules_rust.
 workspace_dependencies()
 
-# CC toolchain.
+# CC toolchains.
 nixpkgs_cc_configure(
     attribute_path = "clang_16",
     repository = "@nixpkgs",
 )
 
-# Foreign CC toolchain.
+# Foreign CC toolchains.
 nixpkgs_foreign_cc_configure(
     repository = "@nixpkgs",
 )
+
+# Emscripten toolchains.
+
+load("@emsdk//:deps.bzl", emsdk_deps = "deps")
+
+emsdk_deps()
+
+load("@emsdk//:emscripten_deps.bzl", "emscripten_deps")
+
+emscripten_deps()
+
+load("@emsdk//:toolchains.bzl", "register_emscripten_toolchains")
+
+register_emscripten_toolchains()
+
+# Rust toolchains.
 
 load("@rules_rust//bindgen:repositories.bzl", "rust_bindgen_dependencies", "rust_bindgen_register_toolchains")
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")

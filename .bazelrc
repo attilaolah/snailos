@@ -18,5 +18,8 @@ build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_to
 # Enable Rust experimental flags for web_sys.
 build --@rules_rust//:extra_rustc_flag=--cfg=web_sys_unstable_apis
 
+# Emscripten build when using --config=wasm.
+build:wasm --platforms=@emsdk//:platform_wasm
+
 # Show test failures.
 test --test_output=errors

@@ -1,9 +1,8 @@
-load("@rules_foreign_cc//foreign_cc:cmake.bzl", "cmake")
+load("//pkg:emscripten_foreign_cc.bzl", "cmake")
 load(":src.bzl", "VERSION")
 
 cmake(
     name = "lzo",
-    lib_source = "@lzo_src//:all",
     out_static_libs = [
         "liblzo{}.a".format(VERSION.split(".")[0]),
     ],

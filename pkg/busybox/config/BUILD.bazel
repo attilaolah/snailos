@@ -17,12 +17,18 @@ busybox_config(
     },
 )
 
-# Portable configuration.
-# Removes some GCC-specific flags.
+# Base BusyBox config.
+# Adds any flags required for cross-compilation.
 busybox_config(
-    name = "portable",
+    name = "base",
     base = ":empty",
-    values = {"use_portable_code": "y"},
+    values = {
+        # Removes GCC-specific flags.
+        "use_portable_code": "y",
+        # Required for proper off_t size detection.
+        # Otherwise compilation fails with BUG_off_t_size_is_misdetected.
+        "lfs": "y",
+    },
     visibility = ["//pkg/busybox:__pkg__"],
 )
 
