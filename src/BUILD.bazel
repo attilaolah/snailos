@@ -9,7 +9,9 @@ load("//config:compilation_modes.bzl", "COMPILATION_MODES")
 rust_shared_library(
     name = "lib",
     srcs = [
+        "binfs.rs",
         "lib.rs",
+        "proc.rs",
         "term.rs",
     ],
     aliases = aliases(normal = True),

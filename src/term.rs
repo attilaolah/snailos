@@ -44,11 +44,11 @@ impl Terminal {
     pub fn open(&self) -> Result<(), Error> {
         self.term.open(
             &window()
-                .ok_or(Error::new("window not found"))?
+                .ok_or(Error::new("not found: [window]"))?
                 .document()
-                .ok_or(Error::new("document not found"))?
+                .ok_or(Error::new("not found: [document]"))?
                 .get_element_by_id("term")
-                .ok_or(Error::new("term not found"))?
+                .ok_or(Error::new("not found: <#term>"))?
                 .into(),
         );
 
