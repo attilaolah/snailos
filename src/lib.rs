@@ -40,9 +40,11 @@ impl SnailOs {
         self.term.open()?;
 
         self.term.writeln("BOOT: Starting BusyBox shell…")?;
+
+        let pid = self.proc.exec("/bin/busybox").await?;
         self.term.writeln(&format!(
             "SHUTDOWN: BusyBox shell exited with code {}",
-            self.proc.exec("/bin/busybox").await?
+            self.proc.wait_pid(pid).await?,
         ))?;
 
         Ok(())
