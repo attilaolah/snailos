@@ -23,7 +23,7 @@ import * as os from "./wasm_bg.js";
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 
-os.boot({
+const boot = os.boot.bind(os, {
   // TODO: Inject classes, don't create objects here.
   term: new Terminal(),
   term_fit_addon: new FitAddon(),
@@ -32,3 +32,5 @@ os.boot({
   import: (mod) => eval(`import(${JSON.stringify(mod)})`),
   COMPILATION_MODE,
 });
+
+setTimeout(boot, 0);

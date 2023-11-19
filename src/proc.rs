@@ -33,9 +33,6 @@ struct Process {
     name: String,
     arguments: Vec<String>,
     state: State,
-
-    print: Closure<dyn Fn(JsString)>,
-    print_err: Closure<dyn Fn(JsString)>,
 }
 
 impl ProcessManager {
@@ -94,19 +91,11 @@ impl Process {
         let name = name.to_string();
         let arguments: Vec<String> = arguments.iter().map(|&s| s.to_string()).collect();
         let state = State::Loading;
-        let print: Closure<dyn Fn(_)> = Closure::new(|text: JsString| {
-            log(&format!(">1: {}", text.to_string()));
-        });
-        let print_err: Closure<dyn Fn(_)> = Closure::new(|text: JsString| {
-            log(&format!(">2: {}", text.to_string()));
-        });
 
         Self {
             name,
             arguments,
             state,
-            print,
-            print_err,
         }
     }
 
@@ -121,8 +110,21 @@ impl Process {
 
         Reflect::set(&args, &"thisProgram".into(), &self.name.clone().into())?;
         Reflect::set(&args, &"arguments".into(), &args_array.into())?;
-        Reflect::set(&args, &"print".into(), &self.print.as_ref())?;
-        Reflect::set(&args, &"printErr".into(), &self.print_err.as_ref())?;
+
+        let (stdout, fdr) = mpsc::channel();
+        let stderr = stdout.clone();
+
+        let print: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
+            log(&format!(">1: {}", text.to_string()));
+            stdout.send(text).unwrap()
+        });
+        let print_err: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
+            log(&format!(">2: {}", text.to_string()));
+            stderr.send(text).unwrap()
+        });
+
+        Reflect::set(&args, &"print".into(), &print.as_ref())?;
+        Reflect::set(&args, &"printErr".into(), &print_err.as_ref())?;
 
         let (quits, quitr) = mpsc::channel();
         let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| quits.send(code).unwrap());
