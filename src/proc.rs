@@ -125,22 +125,15 @@ impl Process {
         Reflect::set(&args, &"printErr".into(), &self.print_err.as_ref())?;
 
         let (quits, quitr) = mpsc::channel();
-        let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
-            log(&format!("EXIT {}", code));
-            quits.send(code).unwrap();
-        });
+        let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| quits.send(code).unwrap());
         Reflect::set(&args, &"quit".into(), &quit.as_ref())?;
 
         self.state = State::Running;
         let promise: Promise = module_loader.call1(&JsValue::undefined(), &args)?.into();
         JsFuture::from(promise).await?;
 
-        let exit_code = quitr.recv().unwrap();
+        let exit_code = quitr.recv().unwrap_or(-1);
         self.state = State::Exited(exit_code);
-        log(&format!("EXIT {} received", exit_code));
-
-        // TODO: Are we sure the module has quit?
-        // Maybe we should wait for quit() to have been called.
 
         Ok(exit_code)
     }
