@@ -1,6 +1,9 @@
 use js_sys::{Array, Error, Function, JsString, Object, Promise, Reflect};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    mpsc,
+};
 use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -23,7 +26,7 @@ pub struct ProcessManager {
 enum State {
     Loading,
     Running,
-    Exited,
+    Exited(i32),
 }
 
 struct Process {
@@ -33,7 +36,6 @@ struct Process {
 
     print: Closure<dyn Fn(JsString)>,
     print_err: Closure<dyn Fn(JsString)>,
-    quit: Closure<dyn Fn(i32)>,
 }
 
 impl ProcessManager {
@@ -97,9 +99,6 @@ impl Process {
         let print_err: Closure<dyn Fn(_)> = Closure::new(|text: JsString| {
             log(&format!(">2: {}", text.to_string()));
         });
-        let quit: Closure<dyn Fn(_)> = Closure::new(|code: i32| {
-            log(&format!("EXIT {}", code));
-        });
 
         Self {
             name,
@@ -107,30 +106,36 @@ impl Process {
             state,
             print,
             print_err,
-            quit,
         }
     }
 
-    fn args_array(&self) -> Array {
-        let js_array = Array::new();
+    async fn run(&mut self, module_loader: Function) -> Result<(), Error> {
+        let args = Object::new();
+        let args_array = Array::new();
         for s in &self.arguments {
             let js_string = JsString::from(s.as_str());
-            js_array.push(&js_string);
+            args_array.push(&js_string);
         }
 
-        js_array
-    }
-
-    async fn run(&self, module_loader: Function) -> Result<(), Error> {
-        let args = Object::new();
         Reflect::set(&args, &"thisProgram".into(), &self.name.clone().into())?;
-        Reflect::set(&args, &"arguments".into(), &self.args_array().into())?;
+        Reflect::set(&args, &"arguments".into(), &args_array.into())?;
         Reflect::set(&args, &"print".into(), &self.print.as_ref())?;
         Reflect::set(&args, &"printErr".into(), &self.print_err.as_ref())?;
-        Reflect::set(&args, &"quit".into(), &self.quit.as_ref())?;
 
+        let (quits, quitr) = mpsc::channel();
+        let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
+            log(&format!("EXIT {}", code));
+            quits.send(code).unwrap();
+        });
+        Reflect::set(&args, &"quit".into(), &quit.as_ref())?;
+
+        self.state = State::Running;
         let promise: Promise = module_loader.call1(&JsValue::undefined(), &args)?.into();
         JsFuture::from(promise).await?;
+
+        let exit_code = quitr.recv().unwrap();
+        self.state = State::Exited(exit_code);
+        log(&format!("EXIT {} received", exit_code));
 
         // TODO: Are we sure the module has quit?
         // Maybe we should wait for quit() to have been called.
