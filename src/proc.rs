@@ -11,7 +11,6 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::binfs::BinFs;
 
-const FD_STDIN: u32 = 0;
 const FD_STDOUT: u32 = 1;
 const FD_STDERR: u32 = 2;
 
@@ -59,11 +58,14 @@ struct IoBuf {
 
 impl ProcessManager {
     pub fn new(import: Function) -> Self {
+        let cnt = AtomicU32::new(1);
+        let map = HashMap::new();
+        let binfs = BinFs::new("/bin");
         Self {
+            cnt,
+            map,
             import,
-            cnt: AtomicU32::new(1),
-            map: HashMap::new(),
-            binfs: BinFs::new("/bin"),
+            binfs,
         }
     }
 
@@ -123,12 +125,12 @@ impl ProcessManager {
 impl Process {
     fn new(module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
         let name: String = name.into();
-        let args: Vec<String> = arguments.iter().map(|&s| s.to_string()).collect();
+        let args: Vec<String> = arguments.into_iter().map(|&s| s.to_string()).collect();
 
-        let args_array = Array::new();
-        for s in arguments {
-            let js_string = JsString::from(*s);
-            args_array.push(&js_string);
+        let args_js = Array::new_with_length(arguments.len() as u32);
+        for (i, arg) in args.iter().enumerate() {
+            args_js.set(i as u32, JsString::from(arg.as_str()).into());
+            //args_js.push(&JsString::from(*s));
         }
 
         let (outs, output) = channel();
@@ -162,7 +164,7 @@ impl Process {
 
         let mod_args = Object::new();
         Reflect::set(&mod_args, &"thisProgram".into(), &name.clone().into())?;
-        Reflect::set(&mod_args, &"arguments".into(), &args_array.into())?;
+        Reflect::set(&mod_args, &"arguments".into(), &args_js.into())?;
         Reflect::set(&mod_args, &"print".into(), &print.as_ref())?;
         Reflect::set(&mod_args, &"printErr".into(), &print_err.as_ref())?;
         Reflect::set(&mod_args, &"quit".into(), &quit.as_ref())?;
@@ -170,12 +172,10 @@ impl Process {
         let promise: Promise = module.call1(&JsValue::undefined(), &mod_args)?.into();
         let future = JsFuture::from(promise);
 
-        {
-            let running_state = Arc::clone(&state);
-            let (lock, _) = &*running_state;
-            let mut state = lock.lock().unwrap();
-            *state = State::Waiting(future);
-        }
+        let running_state = Arc::clone(&state);
+        let (lock, _) = &*running_state;
+        let mut new_state = lock.lock().unwrap();
+        *new_state = State::Waiting(future);
 
         Ok(Self {
             name,
