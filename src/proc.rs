@@ -1,10 +1,10 @@
 use js_sys::{Array, Error, Function, JsString, Object, Promise, Reflect};
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     mpsc::{channel, Receiver},
-    Arc, Condvar, Mutex,
+    Condvar, Mutex,
 };
 use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -21,7 +21,7 @@ extern "C" {
 }
 
 pub struct ProcessManager {
-    cnt: AtomicU32,
+    cnt: u32,
     map: HashMap<u32, Process>,
     import: Function,
 
@@ -31,7 +31,7 @@ pub struct ProcessManager {
 struct Process {
     name: String,
     args: Vec<String>,
-    state: Arc<(Mutex<State>, Condvar)>,
+    state: Rc<(Mutex<State>, Condvar)>,
     output: Receiver<IoBuf>,
 
     // These closures need to stay alive as long as the process is running.
@@ -58,7 +58,7 @@ struct IoBuf {
 
 impl ProcessManager {
     pub fn new(import: Function) -> Self {
-        let cnt = AtomicU32::new(1);
+        let cnt = 1;
         let map = HashMap::new();
         let binfs = BinFs::new("/bin");
         Self {
@@ -117,8 +117,9 @@ impl ProcessManager {
         Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
     }
 
-    fn next_pid(&self) -> u32 {
-        self.cnt.fetch_add(1, Ordering::SeqCst)
+    fn next_pid(&mut self) -> u32 {
+        self.cnt += 1;
+        self.cnt
     }
 }
 
@@ -153,8 +154,8 @@ impl Process {
             outs_err.send(buf).unwrap();
         });
 
-        let state = Arc::new((Mutex::new(State::Initialising), Condvar::new()));
-        let quit_state = Arc::clone(&state);
+        let state = Rc::new((Mutex::new(State::Initialising), Condvar::new()));
+        let quit_state = Rc::clone(&state);
         let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
             let (lock, cvar) = &*quit_state;
             let mut state = lock.lock().unwrap();
@@ -172,7 +173,7 @@ impl Process {
         let promise: Promise = module.call1(&JsValue::undefined(), &mod_args)?.into();
         let future = JsFuture::from(promise);
 
-        let running_state = Arc::clone(&state);
+        let running_state = Rc::clone(&state);
         let (lock, _) = &*running_state;
         let mut new_state = lock.lock().unwrap();
         *new_state = State::Waiting(future);
