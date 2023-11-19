@@ -39,15 +39,17 @@ impl SnailOs {
     async fn boot(&mut self) -> Result<(), Error> {
         self.term.open()?;
 
-        self.term.writeln("BOOT: Starting busybox shell…")?;
-        self.proc.exec("/bin/busybox").await
+        self.term.writeln("BOOT: Starting BusyBox shell…")?;
+        self.term.writeln(&format!(
+            "SHUTDOWN: BusyBox shell exited with code {}",
+            self.proc.exec("/bin/busybox").await?
+        ))?;
+
+        Ok(())
     }
 }
 
 #[wasm_bindgen]
 pub async fn boot(config: JsValue) -> Result<(), Error> {
-    SnailOs::new(config)?.boot().await?;
-
-    // TODO: SHUTDOWN, what now?
-    Ok(())
+    SnailOs::new(config)?.boot().await
 }

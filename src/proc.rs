@@ -51,7 +51,8 @@ impl ProcessManager {
         }
     }
 
-    pub async fn exec(&mut self, file_path: &str) -> Result<(), Error> {
+    /// Executes the given binary file and returns the exit code.
+    pub async fn exec(&mut self, file_path: &str) -> Result<i32, Error> {
         let resolved_path = self
             .binfs
             .resolve(file_path)
@@ -72,7 +73,7 @@ impl ProcessManager {
             )
         });
 
-        process.run(module_loader).await
+        Ok(process.run(module_loader).await?)
     }
 
     async fn load_module(&self, path: &str) -> Result<Function, Error> {
@@ -109,7 +110,8 @@ impl Process {
         }
     }
 
-    async fn run(&mut self, module_loader: Function) -> Result<(), Error> {
+    /// Executes the process and returns its exit code.
+    async fn run(&mut self, module_loader: Function) -> Result<i32, Error> {
         let args = Object::new();
         let args_array = Array::new();
         for s in &self.arguments {
@@ -140,6 +142,6 @@ impl Process {
         // TODO: Are we sure the module has quit?
         // Maybe we should wait for quit() to have been called.
 
-        Ok(())
+        Ok(exit_code)
     }
 }
