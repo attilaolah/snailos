@@ -58,14 +58,11 @@ struct IoBuf {
 
 impl ProcessManager {
     pub fn new(import: Function) -> Self {
-        let cnt = 1;
-        let map = HashMap::new();
-        let binfs = BinFs::new("/bin");
         Self {
-            cnt,
-            map,
+            cnt: 1,
+            map: HashMap::new(),
             import,
-            binfs,
+            binfs: BinFs::new("/bin"),
         }
     }
 
@@ -125,13 +122,9 @@ impl ProcessManager {
 
 impl Process {
     fn new(module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
-        let name: String = name.into();
-        let args: Vec<String> = arguments.into_iter().map(|&s| s.to_string()).collect();
-
         let args_js = Array::new_with_length(arguments.len() as u32);
-        for (i, arg) in args.iter().enumerate() {
-            args_js.set(i as u32, JsString::from(arg.as_str()).into());
-            //args_js.push(&JsString::from(*s));
+        for (i, arg) in arguments.iter().enumerate() {
+            args_js.set(i as u32, JsString::from(*arg).into());
         }
 
         let (outs, output) = channel();
@@ -164,7 +157,7 @@ impl Process {
         });
 
         let mod_args = Object::new();
-        Reflect::set(&mod_args, &"thisProgram".into(), &name.clone().into())?;
+        Reflect::set(&mod_args, &"thisProgram".into(), &name.into())?;
         Reflect::set(&mod_args, &"arguments".into(), &args_js.into())?;
         Reflect::set(&mod_args, &"print".into(), &print.as_ref())?;
         Reflect::set(&mod_args, &"printErr".into(), &print_err.as_ref())?;
@@ -179,8 +172,8 @@ impl Process {
         *new_state = State::Waiting(future);
 
         Ok(Self {
-            name,
-            args,
+            name: name.into(),
+            args: arguments.into_iter().map(|&s| s.to_string()).collect(),
             state,
             output,
 
