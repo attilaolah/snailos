@@ -6,6 +6,8 @@ use crate::term::Terminal;
 
 mod async_io;
 mod binfs;
+mod compilation_mode;
+mod js;
 mod proc;
 mod term;
 

@@ -11,11 +11,17 @@ rust_shared_library(
     srcs = [
         "async_io.rs",
         "binfs.rs",
+        "compilation_mode.rs",
+        "js.rs",
         "lib.rs",
         "proc.rs",
         "term.rs",
     ],
     aliases = aliases(normal = True),
+    crate_features = select({
+        "//config:" + mode: [mode]
+        for mode in COMPILATION_MODES
+    }),
     deps = all_crate_deps(
         package_name = "",
         normal = True,

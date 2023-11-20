@@ -2,38 +2,19 @@ use js_sys::Error;
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use web_sys::window;
 
+use crate::js;
+
 const CRLF: &str = "\r\n";
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_name = Terminal)]
-    type JsTerm;
-
-    #[wasm_bindgen(method)]
-    fn open(this: &JsTerm, parent: &JsValue);
-
-    #[wasm_bindgen(method, js_name = loadAddon)]
-    fn load_addon(this: &JsTerm, addon: &JsValue);
-
-    #[wasm_bindgen(method)]
-    fn write(this: &JsTerm, data: &JsValue, callback: JsValue);
-
-    #[wasm_bindgen(js_name = FitAddon)]
-    type JsFitAddon;
-
-    #[wasm_bindgen(method)]
-    fn fit(this: &JsFitAddon);
-}
-
 pub struct Terminal {
-    term: JsTerm,
-    term_fit_addon: JsFitAddon,
+    term: js::Terminal,
+    term_fit_addon: js::FitAddon,
 }
 
 impl Terminal {
     pub fn new(term: JsValue, term_fit_addon: JsValue) -> Self {
-        let term: JsTerm = term.into();
-        let term_fit_addon: JsFitAddon = term_fit_addon.into();
+        let term: js::Terminal = term.into();
+        let term_fit_addon: js::FitAddon = term_fit_addon.into();
         term.load_addon(&term_fit_addon);
         Self {
             term,
