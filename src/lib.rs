@@ -1,6 +1,7 @@
 use js_sys::{Error, Reflect};
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
+use crate::compilation_mode::COMPILATION_MODE;
 use crate::proc::ProcessManager;
 use crate::term::Terminal;
 
@@ -44,19 +45,22 @@ impl SnailOs {
     async fn boot(&mut self) -> Result<(), Error> {
         self.term.open()?;
 
-        self.term.writeln("BOOT: Starting BusyBox shell…")?;
-        let pid = self.proc.exec("/bin/busybox").await?;
+        self.term.writeln(&format!(
+            "Welcome to SnailOS \"{}\" build!",
+            COMPILATION_MODE
+        ))?;
+        self.term.writeln("Loading BusyBox shell…")?;
+        self.term.writeln("")?;
 
+        let pid = self.proc.exec("/bin/busybox").await?;
         while let Some(output) = self.proc.wait_output(pid).await? {
             for chunk in output {
                 self.term.write(&chunk.as_string().unwrap())?;
             }
         }
 
-        self.term.writeln(&format!(
-            "\r\n\nSHUTDOWN: BusyBox shell exited with code {}",
-            self.proc.wait_quit(pid).await?,
-        ))?;
+        self.term
+            .writeln(&format!("\r\n\nEXIT {}", self.proc.wait_quit(pid).await?))?;
         Ok(())
     }
 }
