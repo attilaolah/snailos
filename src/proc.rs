@@ -55,7 +55,7 @@ impl ProcessManager {
 
     /// Executes the given binary file.
     /// Once the process has started, returns its pid.
-    pub async fn exec(&mut self, file_path: &str) -> Result<u32, Error> {
+    pub async fn exec(&mut self, file_path: &str, args: &[&str]) -> Result<u32, Error> {
         let resolved_path = self
             .binfs
             .resolve(file_path)
@@ -72,7 +72,7 @@ impl ProcessManager {
                 .unwrap() // already validated above
                 .to_string_lossy()
                 .to_string(),
-            &[],
+            args,
             self.p_defer.clone(),
         )?;
 
@@ -154,6 +154,9 @@ impl Process {
         Reflect::set(&mod_args, &"print".into(), &print.as_ref())?;
         Reflect::set(&mod_args, &"printErr".into(), &print_err.as_ref())?;
         Reflect::set(&mod_args, &"quit".into(), &quit.as_ref())?;
+
+        // Variables used in post.js.
+        Reflect::set(&mod_args, &"user".into(), &"snail".into())?;
 
         let promise: Promise = module.call1(&JsValue::null(), &mod_args)?.into();
         let future = JsFuture::from(promise);

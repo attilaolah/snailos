@@ -13,6 +13,18 @@ busybox_config(
         "false": "y",
         "true": "y",
         "yes": "y",
+
+        # Hush shell:
+        "hush": "y",
+        "shell_hush": "y",
+        "feature_sh_nofork": "y",
+        "feature_sh_standalone": "y",
+
+        # Force NOMMU build.
+        # Tells the build system that the target platform has no Memory
+        # Management Unit (MMU). This causes the shell to use vfork() instead
+        # of fork(), which is easier to emulate in the browser.
+        "nommu": "y",
     },
 )
 
