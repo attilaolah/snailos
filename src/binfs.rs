@@ -40,10 +40,10 @@ mod tests {
         let fs = BinFs::new("/bin");
 
         let file_paths = vec![
-            ("/bin/ls", Some("/bin/ls.js".to_string())),
-            ("/bin/perl/cpan", Some("/bin/perl/cpan.js".to_string())),
-            ("/bin/ld.gold", Some("/bin/ld.gold.js".to_string())),
-            ("/bin/node.js", Some("/bin/node.js.js".to_string())),
+            ("/bin/ls", Some(PathBuf::from("/bin/ls.js"))),
+            ("/bin/perl/cpan", Some("/bin/perl/cpan.js".into())),
+            ("/bin/ld.gold", Some("/bin/ld.gold.js".into())),
+            ("/bin/node.js", Some("/bin/node.js.js".into())),
             ("/usr/bin/go", None),
             ("/sbin/sudo", None),
         ];

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::{Condvar, Mutex};
-use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{closure::Closure, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use crate::async_io::AsyncIo;

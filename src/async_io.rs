@@ -1,7 +1,7 @@
 use js_sys::{Array, Error, Function, Object, Promise, Reflect};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 // TODO: Write a Rust wrapper (or binding) for Deferred (entry_point.js).
