@@ -1,3 +1,4 @@
+load("//pkg:wasm_binaries.bzl", "wasm_binaries")
 load("@aspect_rules_webpack//webpack:defs.bzl", "webpack_bundle", "webpack_devserver")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
@@ -8,10 +9,19 @@ load("//config:compilation_modes.bzl", "COMPILATION_MODES")
 rust_shared_library(
     name = "lib",
     srcs = [
+        "async_io.rs",
+        "binfs.rs",
+        "compilation_mode.rs",
+        "js.rs",
         "lib.rs",
+        "proc.rs",
         "term.rs",
     ],
     aliases = aliases(normal = True),
+    crate_features = select({
+        "//config:" + mode: [mode]
+        for mode in COMPILATION_MODES
+    }),
     deps = all_crate_deps(
         package_name = "",
         normal = True,
@@ -31,6 +41,7 @@ webpack_bundle(
     ] + [
         # deps, keep sorted
         "//:node_modules/normalize.css",
+        "//:node_modules/p-defer",
         "//:node_modules/xterm",
         "//:node_modules/xterm-addon-fit",
     ],
@@ -43,6 +54,7 @@ webpack_bundle(
 webpack_devserver(
     name = "server",
     data = [
+        ":bin",
         ":bundle",
         ":css",
         ":index",
@@ -74,4 +86,9 @@ expand_template(
 filegroup(
     name = "css",
     srcs = ["css/style.css"],
+)
+
+wasm_binaries(
+    name = "bin",
+    srcs = ["//pkg/busybox:bin"],
 )

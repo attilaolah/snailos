@@ -1,4 +1,11 @@
 load("//pkg:emscripten_foreign_cc.bzl", "configure_make", "keyval")
+load("//pkg:wasm_binaries.bzl", "wasm_binaries")
+
+wasm_binaries(
+    name = "bin",
+    srcs = [":busybox.build"],
+    visibility = ["//visibility:public"],
+)
 
 ARGS = {
     "HOSTCC": "cc",
@@ -17,10 +24,15 @@ EM_ARGS = {
     "OBJCOPY": "${EMSCRIPTEN}/../bin/llvm-objcopy",
     "OBJDUMP": "${EMSCRIPTEN}/../bin/llvm-objdump",
     "SKIP_STRIP": "y",
+    "CFLAGS_busybox": '"{}"'.format(" ".join([
+        "-sEXPORT_ES6",
+        "-sMODULARIZE",
+        "-sWASM_BIGINT",
+    ])),
 }
 
 configure_make(
-    name = "empty",
+    name = "busybox.build",
     args = select({
         "@platforms//cpu:wasm32": keyval(ARGS, EM_ARGS),
         "//conditions:default": keyval(ARGS, K8_ARGS),

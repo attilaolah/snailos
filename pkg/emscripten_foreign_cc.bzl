@@ -77,9 +77,10 @@ def keyval(*args):
     return ["{}={}".format(key, val) for key, val in kwargs.items()]
 
 def _defaults(name, kwargs):
-    kwargs.setdefault("lib_source", "@{}_src//:all".format(name))
+    basename = name.removesuffix(".build")
+    kwargs.setdefault("lib_source", "@{}_src//:all".format(basename))
     if "out_binaries" not in kwargs:
-        kwargs.setdefault("out_static_libs", ["lib{}.a".format(name)])
+        kwargs.setdefault("out_static_libs", ["lib{}.a".format(basename)])
 
     kwargs["build_data"] = _select(
         wasm = kwargs.get("build_data", []) + EM_TOOLS,

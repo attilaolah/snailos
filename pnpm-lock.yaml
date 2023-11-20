@@ -8,6 +8,9 @@ dependencies:
   normalize.css:
     specifier: ^8.0.1
     version: 8.0.1
+  p-defer:
+    specifier: ^4.0.0
+    version: 4.0.0
   xterm:
     specifier: ^5.3.0
     version: 5.3.0
@@ -1439,6 +1442,11 @@ packages:
       is-docker: 2.2.1
       is-wsl: 2.2.0
     dev: true
+
+  /p-defer@4.0.0:
+    resolution: {integrity: sha512-Vb3QRvQ0Y5XnF40ZUWW7JfLogicVh/EnA5gBIvKDJoYpeI82+1E3AlB9yOcKFS0AhHrWVnAQO39fbR0G99IVEQ==}
+    engines: {node: '>=12'}
+    dev: false
 
   /p-limit@2.3.0:
     resolution: {integrity: sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==}

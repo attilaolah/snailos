@@ -1,34 +1,71 @@
 use js_sys::{Error, Reflect};
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
+use crate::compilation_mode::COMPILATION_MODE;
+use crate::proc::ProcessManager;
 use crate::term::Terminal;
 
+mod async_io;
+mod binfs;
+mod compilation_mode;
+mod js;
+mod proc;
 mod term;
 
-pub struct SnailOs {
+// TODO:
+//
+// - users: simple user/group management
+// - mnt: simple mount point management
+// - binfs: read-only fs mounted at /bin
+// - other signals
+//
+// TODO: Structure the virtual filesystem like so:
+// /bin/busybox is the JS binary without any extension
+// /usr/wasm/cid.wasm is the WASM binary that it loads, where "cid" is the content ID.
+
+struct SnailOs {
+    proc: ProcessManager,
     term: Terminal,
 }
 
 impl SnailOs {
-    pub fn new(config: JsValue) -> Result<SnailOs, Error> {
+    fn new(config: JsValue) -> Result<Self, Error> {
+        let proc = ProcessManager::new(
+            Reflect::get(&config, &"import".into())?.dyn_into()?,
+            Reflect::get(&config, &"p_defer".into())?.dyn_into()?,
+        );
         let term = Terminal::new(
             Reflect::get(&config, &"term".into())?,
             Reflect::get(&config, &"term_fit_addon".into())?,
         );
-        Ok(Self { term })
+
+        Ok(Self { proc, term })
     }
 
-    pub fn run(&self) -> Result<(), Error> {
+    async fn boot(&mut self) -> Result<(), Error> {
         self.term.open()?;
-        self.term.write("Hello, Snails!")?;
 
+        self.term.writeln(&format!(
+            "Welcome to SnailOS \"{}\" build!",
+            COMPILATION_MODE
+        ))?;
+        self.term.writeln("Loading BusyBox shell…")?;
+        self.term.writeln("")?;
+
+        let pid = self.proc.exec("/bin/busybox").await?;
+        while let Some(output) = self.proc.wait_output(pid).await? {
+            for chunk in output {
+                self.term.write(&chunk.as_string().unwrap())?;
+            }
+        }
+
+        self.term
+            .writeln(&format!("\r\n\nEXIT {}", self.proc.wait_quit(pid).await?))?;
         Ok(())
     }
 }
 
 #[wasm_bindgen]
-pub fn main(config: JsValue) -> Result<(), Error> {
-    SnailOs::new(config)?.run()?;
-
-    Ok(())
+pub async fn boot(config: JsValue) -> Result<(), Error> {
+    SnailOs::new(config)?.boot().await
 }
