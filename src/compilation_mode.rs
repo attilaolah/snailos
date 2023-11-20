@@ -1,4 +1,6 @@
-enum CompilationMode{
+use js_sys::Error;
+
+enum CompilationMode {
     Debug,
     FastBuild,
     Optimised,
@@ -11,4 +13,14 @@ const COMPILATION_MODE: CompilationMode = CompilationMode::Debug;
 const COMPILATION_MODE: CompilationMode = CompilationMode::FastBuild;
 
 #[cfg(feature = "opt")]
-const COMPILATION_MODE: CompilationMode = CompilationMode::Opt;
+const COMPILATION_MODE: CompilationMode = CompilationMode::Optimised;
+
+#[cfg(not(feature = "opt"))]
+pub fn unexpected<T>(text: &str) -> Result<T, Error> {
+    Err(Error::new(&format!("unexpected: {}", text)))
+}
+
+#[cfg(feature = "opt")]
+pub fn unexpected<T>(_text: &str) -> Result<T, Error> {
+    unreachable!()
+}

@@ -8,6 +8,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
+use crate::compilation_mode::unexpected;
 
 pub struct ProcessManager {
     cnt: u32,
@@ -186,21 +187,21 @@ impl Process {
                 State::Waiting(_) => match std::mem::replace(&mut *guard, State::Running) {
                     State::Waiting(future) => future,
                     // This should never happen, since we already matched on the type above.
-                    _ => return Err(Error::new("unexpected state: !waiting while waiting")),
+                    _ => return unexpected("unexpected state: !waiting while waiting"),
                 },
                 // Some other caller is already executing the mutex. Wait for the exit signal.
                 State::Running => match cvar.wait(guard) {
                     Ok(mut guard) => match &mut *guard {
                         // The conditional var should only be triggered by the exit callback.
                         State::Exited(exit_code) => return Ok(*exit_code),
-                        _ => return Err(Error::new("unexpected state: !exited after cvar notify")),
+                        _ => return unexpected("state: !exited after cvar notify"),
                     },
-                    Err(_) => return Err(Error::new("mutex poisoned after cvar notify")),
+                    Err(_) => return unexpected("mutex poisoned after cvar notify"),
                 },
                 State::Exited(exit_code) => return Ok(*exit_code),
-                State::Initialising => return Err(Error::new("unexpected state: initialising")),
+                State::Initialising => return unexpected("state: initialising"),
             },
-            Err(_) => return Err(Error::new("mutex poisoned")),
+            Err(_) => return unexpected("mutex poisoned"),
         }
         .await?;
 
@@ -210,11 +211,7 @@ impl Process {
         match lock.lock().unwrap().deref() {
             State::Running => Ok(-1), // zombie process
             State::Exited(exit_code) => Ok(*exit_code),
-            _ => {
-                return Err(Error::new(
-                    "unexpected state: !exited && !running after running",
-                ))
-            }
+            _ => return unexpected("state: !exited && !running after running"),
         }
     }
 }

@@ -1,5 +1,5 @@
 use js_sys::Error;
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::JsValue;
 use web_sys::window;
 
 use crate::js;
