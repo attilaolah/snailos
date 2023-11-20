@@ -1,12 +1,20 @@
 use js_sys::{Error, Reflect};
+use std::sync::mpsc::TryRecvError;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
 use crate::proc::ProcessManager;
 use crate::term::Terminal;
 
+mod async_io;
 mod binfs;
 mod proc;
 mod term;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
 
 // TODO:
 //

@@ -9,6 +9,7 @@ load("//config:compilation_modes.bzl", "COMPILATION_MODES")
 rust_shared_library(
     name = "lib",
     srcs = [
+        "async_io.rs",
         "binfs.rs",
         "lib.rs",
         "proc.rs",
