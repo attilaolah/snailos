@@ -1,13 +1,8 @@
-use js_sys::{Array, Error, Function, JsString, Object, Promise, Reflect};
-use std::collections::HashMap;
+use js_sys::{Array, Error, Function, Promise};
 use std::collections::VecDeque;
-use std::ops::Deref;
 use std::rc::Rc;
-use std::sync::{
-    mpsc::{channel, Receiver},
-    Condvar, Mutex,
-};
-use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
+use std::sync::{Condvar, Mutex};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 /// Asynchronous, Promise-backed I/O with an infinite buffer.
@@ -16,11 +11,11 @@ use wasm_bindgen_futures::JsFuture;
 /// no more data can be sent. Once the buffer is drained, no more consumers can connect.
 pub struct AsyncIo {
     // Internal I/O buffer.
-    queue: VecDeque<Option<JsValue>>,
+    queue: VecDeque<JsValue>,
     // Promise "resolve" function for flushing the entire buffer.
     flush: Option<Function>,
     // Marker indicating whether the channel is closed.
-    end: Option<JsValue>,
+    closed: bool,
 }
 
 struct SyncPromise {
@@ -35,7 +30,7 @@ impl AsyncIo {
         Self {
             queue: VecDeque::new(),
             flush: None,
-            end: None,
+            closed: false,
         }
     }
 
@@ -44,12 +39,7 @@ impl AsyncIo {
     /// If there is a consumer connected, the data will be delivered immediately and this function
     /// returns true. Otherwise, the data is queued and this function returns false.
     pub fn send(&mut self, data: JsValue) -> Result<bool, Error> {
-        // TODO: Use an EOF marker instead so that null values could be sent.
-        if data.is_null() {
-            self.close()
-        } else {
-            self.queue_and_forward(Some(data))
-        }
+        self.queue_and_forward(Some(data))
     }
 
     /// Closes the channel, indicating that no more data can be sent.
@@ -62,9 +52,11 @@ impl AsyncIo {
 
     /// Wait for data to become available.
     ///
-    /// If there is data in the buffer, it will be returned immediately. If the last item returned
-    /// is None, that means the channel is now closed and there is no more data to receive.
-    pub async fn wait(&mut self) -> Result<Vec<Option<JsValue>>, Error> {
+    /// If there is data in the buffer, it will be returned immediately. Otherwise, if the producer
+    /// side is still connected, this function will block until either data becomes available or
+    /// the producer side disconnects. If the producer is disconnected and the queue is drained,
+    /// None is returned.
+    pub async fn wait(&mut self) -> Result<Option<Vec<JsValue>>, Error> {
         if self.flush.is_some() {
             return Err(Error::new("channel busy (receiver already attached)"));
         }
@@ -72,41 +64,47 @@ impl AsyncIo {
         // Fast path if there is already data in the buffer.
         // There may already be a None in the queue, which signals that the channel is closed.
         if !self.queue.is_empty() {
-            return Ok(self.queue.drain(..).collect());
+            return Ok(Some(self.queue.drain(..).collect()));
         }
 
-        if self.is_closed() {
-            // No data, but the channel is closed.
-            return Err(Error::new("channel closed"));
+        if self.closed {
+            // The queue is drained and the channel is closed.
+            // Indicate that there is no more data by returning None.
+            return Ok(None);
         }
 
         // Wait for data.
         let promise = SyncPromise::new();
         self.flush = Some(promise.resolve);
         let data: Array = JsFuture::from(promise.promise).await?.into();
-        let vec: Vec<Option<JsValue>> = data
-            .iter()
-            .map(|val| Some(val))
-            // Replace the end marker with None.
-            .map(|opt| if opt == self.end { None } else { opt })
-            .collect();
 
-        Ok(vec)
+        // Wait is done, more data may have arrived.
+        let vec: Vec<JsValue> = data.iter().collect();
+        Ok(if vec.is_empty() && self.closed {
+            // The channel was closed and there is no more data to return.
+            None
+        } else {
+            // There was still data in the queue. Note that the channel may have been closed: if
+            // so, the consumer will have to make another call to find out.
+            Some(vec)
+        })
     }
 
     fn queue_and_forward(&mut self, data: Option<JsValue>) -> Result<bool, Error> {
-        if self.is_closed() {
+        if self.closed {
             return Err(Error::new("channel closed"));
         }
-        if data.is_none() {
-            self.end = Some(Object::new().into());
+        match data {
+            Some(item) => self.queue.push_back(item),
+            None => {
+                self.closed = true;
+            }
         }
 
-        self.queue.push_back(data);
         if let Some(flush) = &self.flush {
             let data_js = Array::new();
             while let Some(item) = self.queue.pop_front() {
-                data_js.push(&item.unwrap_or(JsValue::null()));
+                data_js.push(&item);
             }
 
             flush.call1(&JsValue::undefined(), &data_js)?;
@@ -115,10 +113,6 @@ impl AsyncIo {
         }
 
         Ok(false)
-    }
-
-    fn is_closed(&self) -> bool {
-        self.end.is_some()
     }
 }
 
@@ -141,8 +135,8 @@ impl SyncPromise {
         });
 
         let (mutex, cvar) = &*mut_cv;
-        let mut guard = mutex.lock().unwrap();
-        let mut guard = cvar.wait(guard).unwrap();
+        let guard = mutex.lock().unwrap();
+        let guard = cvar.wait(guard).unwrap();
         SyncPromise {
             promise,
             resolve: guard.0.clone().unwrap(),

@@ -1,5 +1,4 @@
 use js_sys::{Error, Reflect};
-use std::sync::mpsc::TryRecvError;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
 use crate::proc::ProcessManager;
