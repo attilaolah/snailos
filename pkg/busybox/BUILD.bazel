@@ -37,9 +37,9 @@ configure_make(
         "@platforms//cpu:wasm32": keyval(ARGS, EM_ARGS),
         "//conditions:default": keyval(ARGS, K8_ARGS),
     }),
-    build_data = ["//pkg/busybox/config:base"],
+    build_data = ["//pkg/busybox/config"],
     configure_in_place = True,
-    env = {"CONFIG": "$(execpath //pkg/busybox/config:base)"},
+    env = {"CONFIG": "$(execpath //pkg/busybox/config)"},
     lib_source = "@busybox_src//:all",
     out_binaries = select({
         "@platforms//cpu:wasm32": [
