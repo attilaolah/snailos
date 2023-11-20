@@ -22,6 +22,7 @@ import * as os from "./wasm_bg.js";
 // Dependencies, injected.
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
+import pDefer from "p-defer"
 
 const boot = os.boot.bind(os, {
   // TODO: Inject classes, don't create objects here.
@@ -30,6 +31,7 @@ const boot = os.boot.bind(os, {
   // NOTE: We use eval() to prevent webpack from intercepting the import.
   // TODO: Strip it out in the final build.
   import: (mod) => eval(`import(${JSON.stringify(mod)})`),
+  p_defer: pDefer,
   COMPILATION_MODE,
 });
 

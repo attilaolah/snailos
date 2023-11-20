@@ -9,15 +9,8 @@ mod binfs;
 mod proc;
 mod term;
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
-
 // TODO:
 //
-// - proc: simple process tracking
 // - users: simple user/group management
 // - mnt: simple mount point management
 // - binfs: read-only fs mounted at /bin
@@ -34,7 +27,10 @@ struct SnailOs {
 
 impl SnailOs {
     fn new(config: JsValue) -> Result<Self, Error> {
-        let proc = ProcessManager::new(Reflect::get(&config, &"import".into())?.dyn_into()?);
+        let proc = ProcessManager::new(
+            Reflect::get(&config, &"import".into())?.dyn_into()?,
+            Reflect::get(&config, &"p_defer".into())?.dyn_into()?,
+        );
         let term = Terminal::new(
             Reflect::get(&config, &"term".into())?,
             Reflect::get(&config, &"term_fit_addon".into())?,
@@ -47,13 +43,18 @@ impl SnailOs {
         self.term.open()?;
 
         self.term.writeln("BOOT: Starting BusyBox shell…")?;
-
         let pid = self.proc.exec("/bin/busybox").await?;
-        self.term.writeln(&format!(
-            "SHUTDOWN: BusyBox shell exited with code {}",
-            self.proc.wait_pid(pid).await?,
-        ))?;
 
+        while let Some(output) = self.proc.wait_output(pid).await? {
+            for chunk in output {
+                self.term.write(&chunk.as_string().unwrap())?;
+            }
+        }
+
+        self.term.writeln(&format!(
+            "\r\n\nSHUTDOWN: BusyBox shell exited with code {}",
+            self.proc.wait_quit(pid).await?,
+        ))?;
         Ok(())
     }
 }

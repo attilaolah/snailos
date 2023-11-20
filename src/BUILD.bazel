@@ -35,6 +35,7 @@ webpack_bundle(
     ] + [
         # deps, keep sorted
         "//:node_modules/normalize.css",
+        "//:node_modules/p-defer",
         "//:node_modules/xterm",
         "//:node_modules/xterm-addon-fit",
     ],

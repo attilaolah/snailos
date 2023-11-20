@@ -2,28 +2,18 @@ use js_sys::{Array, Error, Function, JsString, Object, Promise, Reflect};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
-use std::sync::{
-    mpsc::{channel, Receiver},
-    Condvar, Mutex,
-};
+use std::sync::{Condvar, Mutex};
 use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
+use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
-
-const FD_STDOUT: u32 = 1;
-const FD_STDERR: u32 = 2;
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
 
 pub struct ProcessManager {
     cnt: u32,
     map: HashMap<u32, Process>,
     import: Function,
+    p_defer: Function,
 
     binfs: BinFs,
 }
@@ -32,7 +22,7 @@ struct Process {
     name: String,
     args: Vec<String>,
     state: Rc<(Mutex<State>, Condvar)>,
-    output: Receiver<IoBuf>,
+    output: Rc<AsyncIo>,
 
     // These closures need to stay alive as long as the process is running.
     // We will never reference them outside of the constructor, so silence the warnings.
@@ -51,17 +41,13 @@ enum State {
     Exited(i32),
 }
 
-struct IoBuf {
-    fd: u32,
-    data: String,
-}
-
 impl ProcessManager {
-    pub fn new(import: Function) -> Self {
+    pub fn new(import: Function, p_defer: Function) -> Self {
         Self {
             cnt: 1,
             map: HashMap::new(),
             import,
+            p_defer,
             binfs: BinFs::new("/bin"),
         }
     }
@@ -86,6 +72,7 @@ impl ProcessManager {
                 .to_string_lossy()
                 .to_string(),
             &[],
+            self.p_defer.clone(),
         )?;
 
         let pid = self.next_pid();
@@ -94,8 +81,16 @@ impl ProcessManager {
         Ok(pid)
     }
 
-    /// Waits until a process exits, returning its etit code.
-    pub async fn wait_pid(&mut self, pid: u32) -> Result<i32, Error> {
+    /// Waits until a process produces output.
+    pub async fn wait_output(&self, pid: u32) -> Result<Option<Vec<JsValue>>, Error> {
+        match self.map.get(&pid) {
+            Some(p) => p.output.wait().await,
+            None => Err(Error::new(&format!("no such process: {}", pid))),
+        }
+    }
+
+    /// Waits until a process exits, returning its exit code.
+    pub async fn wait_quit(&mut self, pid: u32) -> Result<i32, Error> {
         match self.map.get_mut(&pid) {
             Some(p) => {
                 let exit_code = p.wait().await?;
@@ -107,10 +102,7 @@ impl ProcessManager {
     }
 
     async fn load_module(&self, path: &str) -> Result<Function, Error> {
-        let promise: Promise = self
-            .import
-            .call1(&JsValue::undefined(), &path.into())?
-            .into();
+        let promise: Promise = self.import.call1(&JsValue::null(), &path.into())?.into();
         Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
     }
 
@@ -121,36 +113,35 @@ impl ProcessManager {
 }
 
 impl Process {
-    fn new(module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
+    fn new(
+        module: Function,
+        name: &str,
+        arguments: &[&str],
+        // TODO: Find a better place for this.
+        p_defer: Function,
+    ) -> Result<Self, Error> {
         let args_js = Array::new_with_length(arguments.len() as u32);
         for (i, arg) in arguments.iter().enumerate() {
             args_js.set(i as u32, JsString::from(*arg).into());
         }
 
-        let (outs, output) = channel();
-        let outs_err = outs.clone();
+        let output = Rc::new(AsyncIo::new(p_defer));
+        let stdout = output.clone();
         let print: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
-            log(&format!("{}: fd 1: write: {}", "busybox", text.to_string()));
-            let buf = IoBuf {
-                fd: FD_STDOUT,
-                data: text.into(),
-            };
-            outs.send(buf).unwrap();
+            stdout.send(text.into()).unwrap();
         });
 
+        let stderr = output.clone();
         let print_err: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
-            log(&format!("{}: fd 2: write: {}", "busybox", text.to_string()));
-            let buf = IoBuf {
-                fd: FD_STDERR,
-                data: text.into(),
-            };
-            outs_err.send(buf).unwrap();
+            stderr.send(text.into()).unwrap();
         });
 
         let state = Rc::new((Mutex::new(State::Initialising), Condvar::new()));
-        let quit_state = Rc::clone(&state);
+        let state_quit = Rc::clone(&state);
+        let output_closer = output.clone();
         let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
-            let (lock, cvar) = &*quit_state;
+            output_closer.close().unwrap();
+            let (lock, cvar) = &*state_quit;
             let mut state = lock.lock().unwrap();
             *state = State::Exited(code);
             cvar.notify_all();
@@ -163,7 +154,7 @@ impl Process {
         Reflect::set(&mod_args, &"printErr".into(), &print_err.as_ref())?;
         Reflect::set(&mod_args, &"quit".into(), &quit.as_ref())?;
 
-        let promise: Promise = module.call1(&JsValue::undefined(), &mod_args)?.into();
+        let promise: Promise = module.call1(&JsValue::null(), &mod_args)?.into();
         let future = JsFuture::from(promise);
 
         let running_state = Rc::clone(&state);
@@ -195,21 +186,21 @@ impl Process {
                 State::Waiting(_) => match std::mem::replace(&mut *guard, State::Running) {
                     State::Waiting(future) => future,
                     // This should never happen, since we already matched on the type above.
-                    _ => unreachable!(),
+                    _ => return Err(Error::new("unexpected state: !waiting while waiting")),
                 },
                 // Some other caller is already executing the mutex. Wait for the exit signal.
                 State::Running => match cvar.wait(guard) {
                     Ok(mut guard) => match &mut *guard {
                         // The conditional var should only be triggered by the exit callback.
                         State::Exited(exit_code) => return Ok(*exit_code),
-                        _ => unreachable!(),
+                        _ => return Err(Error::new("unexpected state: !exited after cvar notify")),
                     },
-                    Err(_) => unreachable!(),
+                    Err(_) => return Err(Error::new("mutex poisoned after cvar notify")),
                 },
                 State::Exited(exit_code) => return Ok(*exit_code),
-                _ => unreachable!(),
+                State::Initialising => return Err(Error::new("unexpected state: initialising")),
             },
-            Err(_) => unreachable!(),
+            Err(_) => return Err(Error::new("mutex poisoned")),
         }
         .await?;
 
@@ -219,7 +210,11 @@ impl Process {
         match lock.lock().unwrap().deref() {
             State::Running => Ok(-1), // zombie process
             State::Exited(exit_code) => Ok(*exit_code),
-            _ => unreachable!(), // unexpected state
+            _ => {
+                return Err(Error::new(
+                    "unexpected state: !exited && !running after running",
+                ))
+            }
         }
     }
 }
