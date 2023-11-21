@@ -177,17 +177,19 @@ impl Process {
             // TODO: Set the module here!
         });
         let init_module: Closure<dyn Fn(_, _)> = Closure::new(|env: Object, fs: Object| {
-            Reflect::set(&env, &"USER".into(), &JsString::from("snail")).unwrap();
+            if let Err(_) = Reflect::set(&env, &"USER".into(), &JsString::from("snail")) {
+                js::error("proc: module init: failed to set user");
+            }
 
             // TODO: Write a JS binding for this!
             let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
-            rename
-                .call2(
-                    &fs,
-                    &JsString::from("/home/web_user"),
-                    &JsString::from("/home/snail"),
-                )
-                .unwrap();
+            if let Err(_) = rename.call2(
+                &fs,
+                &JsString::from("/home/web_user"),
+                &JsString::from("/home/snail"),
+            ) {
+                js::error("proc: module init: failed to rename home dir");
+            }
         });
         let init_runtime: Closure<dyn Fn()> = Closure::new(|| {
             // Currently this is a no-op.
