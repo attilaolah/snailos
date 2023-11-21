@@ -21,6 +21,9 @@ extern "C" {
 
     #[wasm_bindgen(method)]
     pub fn fit(this: &FitAddon);
+
+    #[wasm_bindgen(js_namespace = console)]
+    pub fn log(s: &str);
 }
 
 pub async fn load_module(path: &str) -> Result<Function, Error> {

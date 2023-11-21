@@ -27,11 +27,14 @@ EM_ARGS = {
     "CFLAGS_busybox": '"{}"'.format(" ".join([
         # See: https://github.com/emscripten-core/emscripten/issues/20753
         "${EMSCRIPTEN}/system/lib/libc/musl/src/signal/sigisemptyset.c",
-        "--pre-js=${EXT_BUILD_ROOT}/$(execpath //pkg/busybox/interop:pre_js)",
-        "--post-js=${EXT_BUILD_ROOT}/$(execpath //pkg/busybox/interop:post_js)",
+        "--pre-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:pre_js)",
+        "--post-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:post_js)",
         "-sEXPORT_ES6",
         "-sMODULARIZE",
         "-sWASM_BIGINT",
+        "-Wl,--wrap=read",
+        "-L${EXT_BUILD_ROOT}/$(dirname $(execpath //src/wrap))",
+        "-lwrap",
     ])),
 }
 
@@ -46,8 +49,8 @@ configure_make(
     # TODO: select() for :JS inputs!
     build_data = [
         CONFIG,
-        "//pkg/busybox/interop:pre_js",
-        "//pkg/busybox/interop:post_js",
+        "//src/wrap:pre_js",
+        "//src/wrap:post_js",
     ],
     # TODO: Update the configure patch,
     # so that it would update CFLAGS, LDFLAGS, etc. in the config file.
@@ -67,5 +70,9 @@ configure_make(
             'cp busybox_unstripped.wasm "${INSTALLDIR}/bin/busybox.wasm"',
         ]),
         "//conditions:default": "cp _install/bin/* ${INSTALLDIR}/bin",
+    }),
+    deps = select({
+        "@platforms//cpu:wasm32": ["//src/wrap"],
+        "//conditions:default": [],
     }),
 )

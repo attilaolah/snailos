@@ -9,7 +9,7 @@ use wasm_bindgen_futures::JsFuture;
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
 use crate::compilation_mode::unexpected;
-use crate::js::load_module;
+use crate::js;
 
 pub struct ProcessManager {
     cnt: u32,
@@ -27,6 +27,15 @@ struct Process {
 
     // These closures need to stay alive as long as the process is running.
     // We will never reference them outside of the constructor, so silence the warnings.
+    #[allow(dead_code)]
+    set_module: Closure<dyn Fn(Object)>,
+    #[allow(dead_code)]
+    init_module: Closure<dyn Fn(Object, Object)>,
+    #[allow(dead_code)]
+    init_runtime: Closure<dyn Fn()>,
+    #[allow(dead_code)]
+    read: Closure<dyn Fn(i32, u32, u32) -> Promise>,
+
     #[allow(dead_code)]
     print: Closure<dyn Fn(JsString)>,
     #[allow(dead_code)]
@@ -60,7 +69,7 @@ impl ProcessManager {
             .resolve(file_path)
             .ok_or(Error::new(&format!("failed to resolve: {}", file_path)))?;
 
-        let module = load_module(&resolved_path.to_string_lossy().to_string()).await?;
+        let module = js::load_module(&resolved_path.to_string_lossy().to_string()).await?;
 
         let p = Process::new(
             module,
@@ -140,15 +149,48 @@ impl Process {
             cvar.notify_all();
         });
 
+        let os_arg = Object::new();
+
         let mod_args = Object::new();
         Reflect::set(&mod_args, &"thisProgram".into(), &name.into())?;
         Reflect::set(&mod_args, &"arguments".into(), &args_js.into())?;
         Reflect::set(&mod_args, &"print".into(), &print.as_ref())?;
         Reflect::set(&mod_args, &"printErr".into(), &print_err.as_ref())?;
         Reflect::set(&mod_args, &"quit".into(), &quit.as_ref())?;
+        Reflect::set(&mod_args, &"os".into(), &os_arg)?;
+
+        let set_module: Closure<dyn Fn(_)> = Closure::new(move |module: Object| {
+            js::log("set_module");
+        });
+        let init_module: Closure<dyn Fn(_, _)> = Closure::new(|env: Object, fs: Object| {
+            js::log("init_module");
+
+            Reflect::set(&env, &"USER".into(), &JsString::from("snail")).unwrap();
+
+            // TODO: Write a JS binding for this!
+            let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
+            rename.call2(&fs, &JsString::from("/home/web_user"), &JsString::from("/home/snail")).unwrap();
+        });
+        let init_runtime: Closure<dyn Fn()> = Closure::new(|| {
+            js::log("init_runtime");
+        });
+        let read: Closure<dyn Fn(_, _, _) -> _> = Closure::new(|fd: i32, buf: u32, count: u32| -> Promise {
+            js::log(&format!("read fd: {}, buf: {}, count: {}", fd, buf, count));
+
+            // TODO: Hook up the i/o.
+            // For now, we just return a promise that leaks, but closes stdin.
+            Promise::new(&mut |res: Function, rej: Function| {
+                res.call1(&JsValue::null(), &0.into()).unwrap();
+            })
+
+        });
+
+        Reflect::set(&os_arg, &"set_module".into(), &set_module.as_ref())?;
+        Reflect::set(&os_arg, &"init_module".into(), &init_module.as_ref())?;
+        Reflect::set(&os_arg, &"init_runtime".into(), &init_runtime.as_ref())?;
 
         // Variables used in post.js.
-        Reflect::set(&mod_args, &"user".into(), &"snail".into())?;
+        //Reflect::set(&mod_args, &"user".into(), &"snail".into())?;
 
         let promise: Promise = module.call1(&JsValue::null(), &mod_args)?.into();
         let future = JsFuture::from(promise);
@@ -163,6 +205,11 @@ impl Process {
             args: arguments.into_iter().map(|&s| s.to_string()).collect(),
             state,
             output,
+
+            set_module,
+            init_module,
+            init_runtime,
+            read,
 
             print,
             print_err,
