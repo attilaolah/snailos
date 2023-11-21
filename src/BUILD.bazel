@@ -5,6 +5,7 @@ load("@crate_index//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_shared_library")
 load("@rules_rust//wasm_bindgen:wasm_bindgen.bzl", "rust_wasm_bindgen")
 load("//config:compilation_modes.bzl", "COMPILATION_MODES")
+load(":version.bzl", "VERSION")
 
 rust_shared_library(
     name = "lib",
@@ -14,6 +15,7 @@ rust_shared_library(
         "compilation_mode.rs",
         "js.rs",
         "lib.rs",
+        "os.rs",
         "proc.rs",
         "term.rs",
     ],
@@ -22,6 +24,7 @@ rust_shared_library(
         "//config:" + mode: [mode]
         for mode in COMPILATION_MODES
     }),
+    version = VERSION,
     deps = all_crate_deps(
         package_name = "",
         normal = True,

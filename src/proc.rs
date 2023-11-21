@@ -9,11 +9,11 @@ use wasm_bindgen_futures::JsFuture;
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
 use crate::compilation_mode::unexpected;
+use crate::js::load_module;
 
 pub struct ProcessManager {
     cnt: u32,
     map: HashMap<u32, Process>,
-    import: Function,
     p_defer: Function,
 
     binfs: BinFs,
@@ -43,11 +43,10 @@ enum State {
 }
 
 impl ProcessManager {
-    pub fn new(import: Function, p_defer: Function) -> Self {
+    pub fn new(p_defer: Function) -> Self {
         Self {
             cnt: 1,
             map: HashMap::new(),
-            import,
             p_defer,
             binfs: BinFs::new("/bin"),
         }
@@ -61,9 +60,7 @@ impl ProcessManager {
             .resolve(file_path)
             .ok_or(Error::new(&format!("failed to resolve: {}", file_path)))?;
 
-        let module = self
-            .load_module(&resolved_path.to_string_lossy().to_string())
-            .await?;
+        let module = load_module(&resolved_path.to_string_lossy().to_string()).await?;
 
         let p = Process::new(
             module,
@@ -100,11 +97,6 @@ impl ProcessManager {
             }
             None => Err(Error::new(&format!("no such process: {}", pid))),
         }
-    }
-
-    async fn load_module(&self, path: &str) -> Result<Function, Error> {
-        let promise: Promise = self.import.call1(&JsValue::null(), &path.into())?.into();
-        Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
     }
 
     fn next_pid(&mut self) -> u32 {

@@ -19,20 +19,20 @@ import { __wbg_set_wasm } from "./wasm_bg.js";
 __wbg_set_wasm(wasm);
 import * as os from "./wasm_bg.js";
 
-// Dependencies, injected.
+// OS runtime dependencies.
+// These are injected to the "boot" function below.
 import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import pDefer from "p-defer"
 
-const boot = os.boot.bind(os, {
-  // TODO: Inject classes, don't create objects here.
-  term: new Terminal(),
-  term_fit_addon: new FitAddon(),
-  // NOTE: We use eval() to prevent webpack from intercepting the import.
-  // TODO: Strip it out in the final build.
-  import: (mod) => eval(`import(${JSON.stringify(mod)})`),
-  p_defer: pDefer,
-  COMPILATION_MODE,
-});
+const deps = { Terminal, FitAddon, pDefer };
 
-setTimeout(boot, 0);
+// Dynamic import.
+// NOTE: We use eval() to prevent webpack from intercepting the import.
+// TODO: Strip out the `eval` from the final "opt" build.
+//args["import"] = import: (mod) => eval(`import(${JSON.stringify(mod)})`),
+
+
+// Don't block the page load.
+// This will still execute on the main thread, but in the next event loop.
+setTimeout(os.boot.bind(os, deps), 0);

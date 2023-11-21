@@ -1,5 +1,6 @@
-/// Contains JS bindings.
+use js_sys::{eval, Error, Function, Promise, Reflect, JSON::stringify};
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen_futures::JsFuture;
 
 #[wasm_bindgen]
 extern "C" {
@@ -20,4 +21,16 @@ extern "C" {
 
     #[wasm_bindgen(method)]
     pub fn fit(this: &FitAddon);
+}
+
+pub async fn load_module(path: &str) -> Result<Function, Error> {
+    // Currently wasm-bindgen doesn't seem to support dynamic imports.
+    // As a fallback, we eval(…) the import statement. Not very elegant, but it works.
+    let promise: Promise = eval(&format!(
+        "import({})",
+        &stringify(&path.into())?.as_string().unwrap()
+    ))?
+    .into();
+
+    Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
 }

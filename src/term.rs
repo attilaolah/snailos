@@ -1,4 +1,4 @@
-use js_sys::Error;
+use js_sys::{Array, Error, Function, Reflect};
 use wasm_bindgen::JsValue;
 use web_sys::window;
 
@@ -12,14 +12,14 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    pub fn new(term: JsValue, term_fit_addon: JsValue) -> Self {
-        let term: js::Terminal = term.into();
-        let term_fit_addon: js::FitAddon = term_fit_addon.into();
+    pub fn new(terminal: Function, fit_addon: Function) -> Result<Self, Error> {
+        let term: js::Terminal = Reflect::construct(&terminal, &Array::new())?.into();
+        let term_fit_addon: js::FitAddon = Reflect::construct(&fit_addon, &Array::new())?.into();
         term.load_addon(&term_fit_addon);
-        Self {
+        Ok(Self {
             term,
             term_fit_addon,
-        }
+        })
     }
 
     pub fn open(&self) -> Result<(), Error> {
