@@ -29,6 +29,7 @@ EM_ARGS = {
         "${EMSCRIPTEN}/system/lib/libc/musl/src/signal/sigisemptyset.c",
         "--pre-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:pre_js)",
         "--post-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:post_js)",
+        "-sASYNCIFY",
         "-sEXPORT_ES6",
         "-sMODULARIZE",
         "-sWASM_BIGINT",

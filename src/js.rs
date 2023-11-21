@@ -24,6 +24,12 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = console)]
     pub fn log(s: &str);
+
+    #[wasm_bindgen(js_namespace = console)]
+    pub fn warn(s: &str);
+
+    #[wasm_bindgen(js_namespace = console)]
+    pub fn error(s: &str);
 }
 
 pub async fn load_module(path: &str) -> Result<Function, Error> {

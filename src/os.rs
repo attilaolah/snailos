@@ -54,7 +54,7 @@ impl OS {
         }
 
         self.term
-            .writeln(&format!("\r\n\nEXIT {}", self.proc.wait_quit(pid).await?))?;
+            .writeln(&format!("\r\nEXIT {}", self.proc.wait_quit(pid).await?))?;
         Ok(())
     }
 }

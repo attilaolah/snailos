@@ -20,10 +20,10 @@ pub struct ProcessManager {
 }
 
 struct Process {
-    name: String,
-    args: Vec<String>,
     state: Rc<(Mutex<State>, Condvar)>,
     output: Rc<AsyncIo>,
+
+    // TODO: Vec<Closure<…>>?
 
     // These closures need to stay alive as long as the process is running.
     // We will never reference them outside of the constructor, so silence the warnings.
@@ -130,23 +130,37 @@ impl Process {
         let output = Rc::new(AsyncIo::new(p_defer));
         let stdout = output.clone();
         let print: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
-            stdout.send(text.into()).unwrap();
+            if let Err(_) = stdout.send(text.into()) {
+                js::error("proc: stdout: write failed")
+            }
         });
 
         let stderr = output.clone();
         let print_err: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
-            stderr.send(text.into()).unwrap();
+            if let Err(_) = stderr.send(text.into()) {
+                js::error("proc: stderr: write failed")
+            }
         });
 
         let state = Rc::new((Mutex::new(State::Initialising), Condvar::new()));
         let state_quit = Rc::clone(&state);
         let output_closer = output.clone();
         let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
-            output_closer.close().unwrap();
             let (lock, cvar) = &*state_quit;
-            let mut state = lock.lock().unwrap();
-            *state = State::Exited(code);
-            cvar.notify_all();
+            match lock.lock() {
+                Ok(mut state) => {
+                    if let State::Exited(_) = *state {
+                        js::warn("proc: quit: called more than once");
+                        return;
+                    }
+                    if let Err(_) = output_closer.close() {
+                        js::error("proc: quit: failed to close output");
+                    }
+                    *state = State::Exited(code);
+                    cvar.notify_all();
+                }
+                Err(_) => js::error("proc: quit: mutex poisoned"),
+            }
         });
 
         let os_arg = Object::new();
@@ -159,50 +173,61 @@ impl Process {
         Reflect::set(&mod_args, &"quit".into(), &quit.as_ref())?;
         Reflect::set(&mod_args, &"os".into(), &os_arg)?;
 
-        let set_module: Closure<dyn Fn(_)> = Closure::new(move |module: Object| {
-            js::log("set_module");
+        let set_module: Closure<dyn Fn(_)> = Closure::new(move |_module: Object| {
+            // TODO: Set the module here!
         });
         let init_module: Closure<dyn Fn(_, _)> = Closure::new(|env: Object, fs: Object| {
-            js::log("init_module");
-
             Reflect::set(&env, &"USER".into(), &JsString::from("snail")).unwrap();
 
             // TODO: Write a JS binding for this!
             let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
-            rename.call2(&fs, &JsString::from("/home/web_user"), &JsString::from("/home/snail")).unwrap();
+            rename
+                .call2(
+                    &fs,
+                    &JsString::from("/home/web_user"),
+                    &JsString::from("/home/snail"),
+                )
+                .unwrap();
         });
         let init_runtime: Closure<dyn Fn()> = Closure::new(|| {
-            js::log("init_runtime");
+            // Currently this is a no-op.
         });
-        let read: Closure<dyn Fn(_, _, _) -> _> = Closure::new(|fd: i32, buf: u32, count: u32| -> Promise {
-            js::log(&format!("read fd: {}, buf: {}, count: {}", fd, buf, count));
-
-            // TODO: Hook up the i/o.
-            // For now, we just return a promise that leaks, but closes stdin.
-            Promise::new(&mut |res: Function, rej: Function| {
-                res.call1(&JsValue::null(), &0.into()).unwrap();
-            })
-
-        });
+        let read: Closure<dyn Fn(_, _, _) -> _> =
+            Closure::new(|fd: i32, _buf: u32, _count: u32| -> Promise {
+                // TODO: Hook up the i/o.
+                // For now, we just return a promise that leaks, but closes stdin.
+                Promise::new(&mut |res: Function, _: Function| {
+                    if let Err(_) = res.call1(&JsValue::null(), &0.into()) {
+                        js::log(&format!("proc: fd {}: read error", fd));
+                    }
+                })
+            });
 
         Reflect::set(&os_arg, &"set_module".into(), &set_module.as_ref())?;
         Reflect::set(&os_arg, &"init_module".into(), &init_module.as_ref())?;
         Reflect::set(&os_arg, &"init_runtime".into(), &init_runtime.as_ref())?;
-
-        // Variables used in post.js.
-        //Reflect::set(&mod_args, &"user".into(), &"snail".into())?;
+        Reflect::set(&os_arg, &"read".into(), &read.as_ref())?;
 
         let promise: Promise = module.call1(&JsValue::null(), &mod_args)?.into();
         let future = JsFuture::from(promise);
 
+        // NOTE: At this point the module has started running the code.
+        // If there is nothing blocking it, it might have already quit!
+
         let running_state = Rc::clone(&state);
         let (lock, _) = &*running_state;
-        let mut new_state = lock.lock().unwrap();
-        *new_state = State::Waiting(future);
+        match lock.lock() {
+            Ok(mut guard) => match *guard {
+                State::Initialising => {
+                    *guard = State::Waiting(future);
+                }
+                State::Exited(_) => (),
+                _ => js::error("proc: new: unexpected state"),
+            },
+            Err(_) => js::error("proc: new: mutex poisoned"),
+        }
 
         Ok(Self {
-            name: name.into(),
-            args: arguments.into_iter().map(|&s| s.to_string()).collect(),
             state,
             output,
 
