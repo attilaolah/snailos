@@ -52,7 +52,7 @@ impl SnailOs {
         self.term.writeln("Loading BusyBox shell…")?;
         self.term.writeln("")?;
 
-        let pid = self.proc.exec("/bin/busybox").await?;
+        let pid = self.proc.exec("/bin/busybox", &["hush"]).await?;
         while let Some(output) = self.proc.wait_output(pid).await? {
             for chunk in output {
                 self.term.write(&chunk.as_string().unwrap())?;

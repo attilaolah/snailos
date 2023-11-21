@@ -1,19 +1,30 @@
 load("@rules_foreign_cc//foreign_cc:configure.bzl", "configure_make")
 load(":busybox_config.bzl", "busybox_config")
 
+package(default_visibility = ["//pkg/busybox:__pkg__"])
+
 # Absolute minimum configuration.
 # This builds an empty BusyBox that prints "no applets enabled".
 busybox_config(
-    name = "empty",
-    base = ":all_no",
-    remove = [
-        "install_applet_symlinks",
-        "sh_is_ash",
-        "shell_ash",
-    ],
+    name = "config",
+    base = ":base",
     values = {
-        "install_applet_dont": "y",
-        "sh_is_none": "y",
+        # Applets:
+        "false": "y",
+        "true": "y",
+        "yes": "y",
+
+        # Hush shell:
+        "hush": "y",
+        "shell_hush": "y",
+        "feature_sh_nofork": "y",
+        "feature_sh_standalone": "y",
+
+        # Force NOMMU build.
+        # Tells the build system that the target platform has no Memory
+        # Management Unit (MMU). This causes the shell to use vfork() instead
+        # of fork(), which is easier to emulate in the browser.
+        "nommu": "y",
     },
 )
 
@@ -29,7 +40,22 @@ busybox_config(
         # Otherwise compilation fails with BUG_off_t_size_is_misdetected.
         "lfs": "y",
     },
-    visibility = ["//pkg/busybox:__pkg__"],
+)
+
+# Absolute minimum configuration.
+# This builds an empty BusyBox that prints "no applets enabled".
+busybox_config(
+    name = "empty",
+    base = ":all_no",
+    remove = [
+        "install_applet_symlinks",
+        "sh_is_ash",
+        "shell_ash",
+    ],
+    values = {
+        "install_applet_dont": "y",
+        "sh_is_none": "y",
+    },
 )
 
 # BusyBox's default "allnoconfig" output.
