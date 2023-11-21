@@ -1,14 +1,21 @@
 diff --git configure configure
 new file mode 100755
-index 000000000..f056085d1
+index 000000000..82c4d5042
 --- /dev/null
 +++ configure
-@@ -0,0 +1,5 @@
+@@ -0,0 +1,12 @@
 +#!/bin/bash
 +
 +# We have a prepared configuration, copy it to where it is expected.
 +# If no configuration is present, then do nothing, we will likely generate it.
-+[ -n "${CONFIG}" ] && cp "${CONFIG}" .config || true
++if [ -n "$CONFIG" ]; then
++  CFLAGS_ESC=$(printf "%s\n" "${CFLAGS}" | sed 's/[\&/]/\\&/g')
++  LDFLAGS_ESC=$(printf "%s\n" "${LDFLAGS}" | sed 's/[\&/]/\\&/g')
++  sed --regexp-extended \
++    --expression "s/^CONFIG_EXTRA_CFLAGS=\"(.*)\"$/CONFIG_EXTRA_CFLAGS=\"${CFLAGS_ESC}\"/" \
++    --expression "s/^CONFIG_EXTRA_LDFLAGS=\"(.*)\"$/CONFIG_EXTRA_LDFLAGS=\"${LDFLAGS_ESC}\"/" \
++    "${CONFIG}" > .config
++fi
 diff --git scripts/trylink scripts/trylink
 index 2255deee7..583ed4af7 100755
 --- scripts/trylink
