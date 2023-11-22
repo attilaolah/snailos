@@ -5,6 +5,7 @@ use crate::os::OS;
 
 mod async_io;
 mod binfs;
+mod closures;
 mod compilation_mode;
 mod js;
 mod os;

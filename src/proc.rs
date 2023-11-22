@@ -8,6 +8,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
+use crate::closures::Closures;
 use crate::compilation_mode::unexpected;
 use crate::js;
 
@@ -22,26 +23,7 @@ pub struct ProcessManager {
 struct Process {
     state: Rc<(Mutex<State>, Condvar)>,
     output: Rc<AsyncIo>,
-
-    // TODO: Vec<Closure<…>>?
-
-    // These closures need to stay alive as long as the process is running.
-    // We will never reference them outside of the constructor, so silence the warnings.
-    #[allow(dead_code)]
-    set_module: Closure<dyn Fn(Object)>,
-    #[allow(dead_code)]
-    init_module: Closure<dyn Fn(Object, Object)>,
-    #[allow(dead_code)]
-    init_runtime: Closure<dyn Fn()>,
-    #[allow(dead_code)]
-    read: Closure<dyn Fn(i32, u32, u32) -> Promise>,
-
-    #[allow(dead_code)]
-    print: Closure<dyn Fn(JsString)>,
-    #[allow(dead_code)]
-    print_err: Closure<dyn Fn(JsString)>,
-    #[allow(dead_code)]
-    quit: Closure<dyn Fn(i32)>,
+    closures: Closures,
 }
 
 enum State {
@@ -127,88 +109,113 @@ impl Process {
             args_js.set(i as u32, JsString::from(*arg).into());
         }
 
+        let mod_args = Object::new();
+
+        let mut closures = Closures::new();
         let output = Rc::new(AsyncIo::new(p_defer));
         let stdout = output.clone();
-        let print: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
-            if let Err(_) = stdout.send(text.into()) {
-                js::error("proc: stdout: write failed")
-            }
+        closures.add({
+            let c: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
+                if let Err(_) = stdout.send(text.into()) {
+                    js::error("proc: stdout: write failed")
+                }
+            });
+            Reflect::set(&mod_args, &"print".into(), &c.as_ref())?;
+            c
         });
 
         let stderr = output.clone();
-        let print_err: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
-            if let Err(_) = stderr.send(text.into()) {
-                js::error("proc: stderr: write failed")
-            }
+        closures.add({
+            let c: Closure<dyn Fn(_)> = Closure::new(move |text: JsString| {
+                if let Err(_) = stderr.send(text.into()) {
+                    js::error("proc: stderr: write failed")
+                }
+            });
+            Reflect::set(&mod_args, &"printErr".into(), &c.as_ref())?;
+            c
         });
 
         let state = Rc::new((Mutex::new(State::Initialising), Condvar::new()));
         let state_quit = Rc::clone(&state);
         let output_closer = output.clone();
-        let quit: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
-            let (lock, cvar) = &*state_quit;
-            match lock.lock() {
-                Ok(mut state) => {
-                    if let State::Exited(_) = *state {
-                        js::warn("proc: quit: called more than once");
-                        return;
+        closures.add({
+            let c: Closure<dyn Fn(_)> = Closure::new(move |code: i32| {
+                let (lock, cvar) = &*state_quit;
+                match lock.lock() {
+                    Ok(mut state) => {
+                        if let State::Exited(_) = *state {
+                            js::warn("proc: quit: called more than once");
+                            return;
+                        }
+                        if let Err(_) = output_closer.close() {
+                            js::error("proc: quit: failed to close output");
+                        }
+                        *state = State::Exited(code);
+                        cvar.notify_all();
                     }
-                    if let Err(_) = output_closer.close() {
-                        js::error("proc: quit: failed to close output");
-                    }
-                    *state = State::Exited(code);
-                    cvar.notify_all();
+                    Err(_) => js::error("proc: quit: mutex poisoned"),
                 }
-                Err(_) => js::error("proc: quit: mutex poisoned"),
-            }
+            });
+            Reflect::set(&mod_args, &"quit".into(), &c.as_ref())?;
+            c
         });
 
         let os_arg = Object::new();
 
-        let mod_args = Object::new();
         Reflect::set(&mod_args, &"thisProgram".into(), &name.into())?;
         Reflect::set(&mod_args, &"arguments".into(), &args_js.into())?;
-        Reflect::set(&mod_args, &"print".into(), &print.as_ref())?;
-        Reflect::set(&mod_args, &"printErr".into(), &print_err.as_ref())?;
-        Reflect::set(&mod_args, &"quit".into(), &quit.as_ref())?;
         Reflect::set(&mod_args, &"os".into(), &os_arg)?;
 
-        let set_module: Closure<dyn Fn(_)> = Closure::new(move |_module: Object| {
-            // TODO: Set the module here!
-        });
-        let init_module: Closure<dyn Fn(_, _)> = Closure::new(|env: Object, fs: Object| {
-            if let Err(_) = Reflect::set(&env, &"USER".into(), &JsString::from("snail")) {
-                js::error("proc: module init: failed to set user");
-            }
-
-            // TODO: Write a JS binding for this!
-            let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
-            if let Err(_) = rename.call2(
-                &fs,
-                &JsString::from("/home/web_user"),
-                &JsString::from("/home/snail"),
-            ) {
-                js::error("proc: module init: failed to rename home dir");
-            }
-        });
-        let init_runtime: Closure<dyn Fn()> = Closure::new(|| {
-            // Currently this is a no-op.
-        });
-        let read: Closure<dyn Fn(_, _, _) -> _> =
-            Closure::new(|fd: i32, _buf: u32, _count: u32| -> Promise {
-                // TODO: Hook up the i/o.
-                // For now, we just return a promise that leaks, but closes stdin.
-                Promise::new(&mut |res: Function, _: Function| {
-                    if let Err(_) = res.call1(&JsValue::null(), &0.into()) {
-                        js::log(&format!("proc: fd {}: read error", fd));
-                    }
-                })
+        closures.add({
+            let c: Closure<dyn Fn(_)> = Closure::new(move |_module: Object| {
+                // TODO: Set the module here!
             });
+            Reflect::set(&os_arg, &"set_module".into(), &c.as_ref())?;
+            c
+        });
 
-        Reflect::set(&os_arg, &"set_module".into(), &set_module.as_ref())?;
-        Reflect::set(&os_arg, &"init_module".into(), &init_module.as_ref())?;
-        Reflect::set(&os_arg, &"init_runtime".into(), &init_runtime.as_ref())?;
-        Reflect::set(&os_arg, &"read".into(), &read.as_ref())?;
+        closures.add({
+            let c: Closure<dyn Fn(_, _)> = Closure::new(|env: Object, fs: Object| {
+                if let Err(_) = Reflect::set(&env, &"USER".into(), &JsString::from("snail")) {
+                    js::error("proc: module init: failed to set user");
+                }
+
+                // TODO: Write a JS binding for this!
+                let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
+                if let Err(_) = rename.call2(
+                    &fs,
+                    &JsString::from("/home/web_user"),
+                    &JsString::from("/home/snail"),
+                ) {
+                    js::error("proc: module init: failed to rename home dir");
+                }
+            });
+            Reflect::set(&os_arg, &"init_module".into(), &c.as_ref())?;
+            c
+        });
+
+        closures.add({
+            let c: Closure<dyn Fn()> = Closure::new(|| {
+                // Currently this is a no-op.
+            });
+            Reflect::set(&os_arg, &"init_runtime".into(), &c.as_ref())?;
+            c
+        });
+
+        closures.add({
+            let c: Closure<dyn Fn(_, _, _) -> _> =
+                Closure::new(|fd: i32, _buf: u32, _count: u32| -> Promise {
+                    // TODO: Hook up the i/o.
+                    // For now, we just return a promise that leaks, but closes stdin.
+                    Promise::new(&mut |res: Function, _: Function| {
+                        if let Err(_) = res.call1(&JsValue::null(), &0.into()) {
+                            js::log(&format!("proc: fd {}: read error", fd));
+                        }
+                    })
+                });
+            Reflect::set(&os_arg, &"read".into(), &c.as_ref())?;
+            c
+        });
 
         let promise: Promise = module.call1(&JsValue::null(), &mod_args)?.into();
         let future = JsFuture::from(promise);
@@ -232,15 +239,7 @@ impl Process {
         Ok(Self {
             state,
             output,
-
-            set_module,
-            init_module,
-            init_runtime,
-            read,
-
-            print,
-            print_err,
-            quit,
+            closures,
         })
     }
 
