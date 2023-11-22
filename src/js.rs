@@ -1,5 +1,5 @@
 use js_sys::{eval, Error, Function, Object, Promise, Reflect, JSON::stringify};
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 #[wasm_bindgen]
@@ -44,6 +44,7 @@ pub async fn load_module(path: &str) -> Result<Function, Error> {
     Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
 }
 
+/// Object builder.
 pub struct Builder {
     obj: Object,
 }
@@ -53,14 +54,63 @@ impl Builder {
         Self { obj: Object::new() }
     }
 
-    pub fn set(self, name: &str, value: &JsValue) -> Result<Self, Error> {
-        Reflect::set(&self.obj, &JsValue::from_str(name), value)?;
+    /// Sets the object key to the specified value.
+    ///
+    /// If the key contains dots, a nested structure will be created.
+    pub fn set<T>(self, key: &str, value: T) -> Result<Self, Error>
+    where
+        T: Into<JsValue>,
+    {
+        self.set_item(key, value)?;
         Ok(self)
+    }
+
+    pub fn set_ref<T: ?Sized>(&self, key: &str, value: Closure<T>) -> Result<Closure<T>, Error> {
+        self.set_item(key, value.as_ref())?;
+        Ok(value)
+    }
+
+    fn set_item<T>(&self, key: &str, value: T) -> Result<(), Error>
+    where
+        T: Into<JsValue>,
+    {
+        let mut current = self.obj.clone();
+        let parts: Vec<&str> = key.split('.').collect();
+
+        for (i, part) in parts.iter().enumerate() {
+            if parts.len() - 1 == i {
+                continue;
+            }
+            if !Reflect::has(&current, &JsValue::from_str(part))? {
+                let obj = Object::new();
+                Reflect::set(&current, &JsValue::from_str(part), &obj)?;
+                current = obj.clone();
+            } else {
+                current = Reflect::get(&current, &JsValue::from_str(part))
+                    .unwrap()
+                    .clone()
+                    .into();
+            }
+        }
+
+        Reflect::set(
+            &current,
+            &JsValue::from_str(parts.last().unwrap()),
+            &value.into(),
+        )?;
+
+        Ok(())
     }
 }
 
 impl Into<Object> for Builder {
     fn into(self) -> Object {
         self.obj
+    }
+}
+
+impl Into<JsValue> for Builder {
+    fn into(self) -> JsValue {
+        self.obj.into()
     }
 }
