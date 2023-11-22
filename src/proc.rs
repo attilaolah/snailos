@@ -29,7 +29,8 @@ struct Process {
 }
 
 enum State {
-    Initialising,
+    Init,
+    InitFailed,
     Waiting(JsFuture),
     Running,
     Exited(i32),
@@ -112,7 +113,7 @@ impl Process {
         let stdout = output.clone();
         let stderr = output.clone();
         let output_closer = output.clone();
-        let state = Rc::new((Mutex::new(State::Initialising), Condvar::new()));
+        let state = Rc::new((Mutex::new(State::Init), Condvar::new()));
         let state_quit = Rc::clone(&state);
 
         let args_builder = js::Builder::new()
@@ -187,6 +188,8 @@ impl Process {
                 match lock.lock() {
                     Ok(mut state) => {
                         if let State::Exited(_) = *state {
+                            // This happens when quit() is called more than once.
+                            // This seems to happen due to Emscripten's Asyncify rewinding.
                             js::warn("proc: quit: called more than once");
                             return;
                         }
@@ -201,8 +204,16 @@ impl Process {
             }) as Closure<dyn Fn(_)>,
         )?);
 
-        let promise: Promise = module.call1(&JsValue::null(), &args_builder.into())?.into();
-        let future = JsFuture::from(promise);
+        let new_state = match module.call1(&JsValue::null(), &args_builder.into()) {
+            Ok(result) => {
+                let promise: Promise = result.into();
+                State::Waiting(JsFuture::from(promise))
+            }
+            Err(err) => {
+                js::error(&format!("proc: exec failed: {:?}", err));
+                State::InitFailed
+            }
+        };
 
         // NOTE: At this point the module has started running the code.
         // If there is nothing blocking it, it might have already quit!
@@ -211,10 +222,10 @@ impl Process {
         let (lock, _) = &*running_state;
         match lock.lock() {
             Ok(mut guard) => match *guard {
-                State::Initialising => {
-                    *guard = State::Waiting(future);
+                State::Init => {
+                    *guard = new_state;
                 }
-                State::Exited(_) => (),
+                State::Exited(_) | State::InitFailed => (),
                 _ => js::error("proc: new: unexpected state"),
             },
             Err(_) => js::error("proc: new: mutex poisoned"),
@@ -251,7 +262,8 @@ impl Process {
                     Err(_) => return unexpected("mutex poisoned after cvar notify"),
                 },
                 State::Exited(exit_code) => return Ok(*exit_code),
-                State::Initialising => return unexpected("state: initialising"),
+                State::Init => return unexpected("state: init"),
+                State::InitFailed => return unexpected("state: init failed"),
             },
             Err(_) => return unexpected("mutex poisoned"),
         }
