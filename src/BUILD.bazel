@@ -12,12 +12,12 @@ rust_shared_library(
     srcs = [
         "async_io.rs",
         "binfs.rs",
-        "closures.rs",
         "compilation_mode.rs",
         "js.rs",
         "lib.rs",
         "os.rs",
         "proc.rs",
+        "proc_closures.rs",
         "term.rs",
     ],
     aliases = aliases(normal = True),

@@ -1,4 +1,4 @@
-use js_sys::{eval, Error, Function, Object, Promise, Reflect, JSON::stringify};
+use js_sys::{eval, Array, Error, Function, JsString, Object, Promise, Reflect, JSON::stringify};
 use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -42,6 +42,14 @@ pub async fn load_module(path: &str) -> Result<Function, Error> {
     .into();
 
     Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
+}
+
+pub fn str_array(items: &[&str]) -> Array {
+    let array = Array::new_with_length(items.len() as u32);
+    for (i, arg) in items.iter().enumerate() {
+        array.set(i as u32, JsString::from(*arg).into());
+    }
+    array
 }
 
 /// Object builder.

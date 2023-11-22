@@ -1,16 +1,16 @@
-use js_sys::{Array, Error, Function, JsString, Object, Promise, Reflect};
+use js_sys::{Error, Function, Promise};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::{Condvar, Mutex};
-use wasm_bindgen::{closure::Closure, JsValue};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
-use crate::closures::Closures;
 use crate::compilation_mode::unexpected;
 use crate::js;
+use crate::proc_closures::ProcClosures;
 
 pub struct ProcessManager {
     cnt: u32,
@@ -25,10 +25,10 @@ struct Process {
     output: Rc<AsyncIo>,
 
     #[allow(dead_code)]
-    closures: Closures,
+    closures: ProcClosures,
 }
 
-enum State {
+pub enum State {
     Init,
     InitFailed,
     Waiting(JsFuture),
@@ -107,102 +107,21 @@ impl Process {
         // TODO: Find a better place for this.
         p_defer: Function,
     ) -> Result<Self, Error> {
-        let mut closures = Closures::new();
+        let mut closures = ProcClosures::new();
 
         let output = Rc::new(AsyncIo::new(p_defer));
-        let stdout = output.clone();
-        let stderr = output.clone();
-        let output_closer = output.clone();
         let state = Rc::new((Mutex::new(State::Init), Condvar::new()));
-        let state_quit = Rc::clone(&state);
 
         let args_builder = js::Builder::new()
             .set("thisProgram", name)?
-            .set("arguments", {
-                let a = Array::new_with_length(arguments.len() as u32);
-                for (i, arg) in arguments.iter().enumerate() {
-                    a.set(i as u32, JsString::from(*arg).into());
-                }
-                a
-            })?;
-        closures.add(args_builder.set_ref(
-            "os.set_module",
-            Closure::new(move |_module: Object| {
-                // TODO: Set the module here!
-            }) as Closure<dyn Fn(_)>,
-        )?);
-        closures.add(args_builder.set_ref(
-            "os.init_module",
-            Closure::new(|env: Object, fs: Object| {
-                if let Err(_) = Reflect::set(&env, &"USER".into(), &JsString::from("snail")) {
-                    js::error("proc: module init: failed to set user");
-                }
-
-                // TODO: Write a JS binding for this!
-                let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
-                if let Err(_) = rename.call2(
-                    &fs,
-                    &JsString::from("/home/web_user"),
-                    &JsString::from("/home/snail"),
-                ) {
-                    js::error("proc: module init: failed to rename home dir");
-                }
-            }) as Closure<dyn Fn(_, _)>,
-        )?);
-        closures.add(args_builder.set_ref(
-            "os.init_runtime",
-            Closure::new(move || {}) as Closure<dyn Fn()>,
-        )?);
-        closures.add(args_builder.set_ref(
-            "os.read",
-            Closure::new(|fd: i32, _buf: u32, _count: u32| -> Promise {
-                // TODO: Hook up the i/o.
-                // For now, we just return a promise that leaks, but closes stdin.
-                Promise::new(&mut |res: Function, _: Function| {
-                    if let Err(_) = res.call1(&JsValue::null(), &0.into()) {
-                        js::log(&format!("proc: fd {}: read error", fd));
-                    }
-                })
-            }) as Closure<dyn Fn(_, _, _) -> _>,
-        )?);
-        closures.add(args_builder.set_ref(
-            "print", // TODO: Check if still needed?
-            Closure::new(move |text: JsString| {
-                if let Err(_) = stdout.send(text.into()) {
-                    js::error("proc: stdout: write failed")
-                }
-            }) as Closure<dyn Fn(_)>,
-        )?);
-        closures.add(args_builder.set_ref(
-            "printErr", // TODO: Check if still needed?
-            Closure::new(move |text: JsString| {
-                if let Err(_) = stderr.send(text.into()) {
-                    js::error("proc: stderr: write failed")
-                }
-            }) as Closure<dyn Fn(_)>,
-        )?);
-        closures.add(args_builder.set_ref(
-            "quit",
-            Closure::new(move |code: i32| {
-                let (lock, cvar) = &*state_quit;
-                match lock.lock() {
-                    Ok(mut state) => {
-                        if let State::Exited(_) = *state {
-                            // This happens when quit() is called more than once.
-                            // This seems to happen due to Emscripten's Asyncify rewinding.
-                            js::warn("proc: quit: called more than once");
-                            return;
-                        }
-                        if let Err(_) = output_closer.close() {
-                            js::error("proc: quit: failed to close output");
-                        }
-                        *state = State::Exited(code);
-                        cvar.notify_all();
-                    }
-                    Err(_) => js::error("proc: quit: mutex poisoned"),
-                }
-            }) as Closure<dyn Fn(_)>,
-        )?);
+            .set("arguments", js::str_array(arguments))?;
+        closures.add(args_builder.set_ref("os.set_module", ProcClosures::set_module())?);
+        closures.add(args_builder.set_ref("os.init_module", ProcClosures::init_module())?);
+        closures.add(args_builder.set_ref("os.init_runtime", ProcClosures::init_runtime())?);
+        closures.add(args_builder.set_ref("os.read", ProcClosures::read())?);
+        closures.add(args_builder.set_ref("print", ProcClosures::print(&output))?);
+        closures.add(args_builder.set_ref("printErr", ProcClosures::print(&output))?);
+        closures.add(args_builder.set_ref("exit", ProcClosures::exit(&state, &output))?);
 
         let new_state = match module.call1(&JsValue::null(), &args_builder.into()) {
             Ok(result) => {

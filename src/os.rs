@@ -49,7 +49,7 @@ impl OS {
         let pid = self.proc.exec("/bin/busybox", &["hush"]).await?;
         while let Some(output) = self.proc.wait_output(pid).await? {
             for chunk in output {
-                self.term.write(&chunk.as_string().unwrap())?;
+                self.term.writeln(&chunk.as_string().unwrap())?;
             }
         }
 

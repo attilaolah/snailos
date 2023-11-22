@@ -29,7 +29,7 @@ EM_ARGS = {
         "${EMSCRIPTEN}/system/lib/libc/musl/src/signal/sigisemptyset.c",
         "--pre-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:pre_js)",
         "--post-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:post_js)",
-        "-sASYNCIFY=1", # JSPI=off, Asyncify=on
+        "-sASYNCIFY=1",  # JSPI=off, Asyncify=on
         "-sASYNCIFY_STACK_SIZE=1048576",  # 1 MiB
         "-sENVIRONMENT=web",
         "-sEXPORT_ES6",
