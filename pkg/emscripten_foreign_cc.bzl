@@ -77,7 +77,7 @@ def keyval(*args):
     return ["{}={}".format(key, val) for key, val in kwargs.items()]
 
 def _defaults(name, kwargs):
-    basename = name.removesuffix(".build")
+    basename = name.removesuffix(".pkg")
     kwargs.setdefault("lib_source", "@{}_src//:all".format(basename))
     if "out_binaries" not in kwargs:
         kwargs.setdefault("out_static_libs", ["lib{}.a".format(basename)])

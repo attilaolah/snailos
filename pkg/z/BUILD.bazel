@@ -1,6 +1,6 @@
 load("//pkg:emscripten_foreign_cc.bzl", "configure_make")
 
 configure_make(
-    name = "z.build",
+    name = "z.pkg",
     configure_options = ["--static"],
 )

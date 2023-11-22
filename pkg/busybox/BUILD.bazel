@@ -3,7 +3,7 @@ load("//pkg:wasm_binaries.bzl", "wasm_binaries")
 
 wasm_binaries(
     name = "bin",
-    srcs = [":busybox.build"],
+    srcs = [":busybox.pkg"],
     visibility = ["//visibility:public"],
 )
 
@@ -29,20 +29,33 @@ EM_ARGS = {
         "${EMSCRIPTEN}/system/lib/libc/musl/src/signal/sigisemptyset.c",
         "--pre-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:pre_js)",
         "--post-js=${EXT_BUILD_ROOT}/$(execpath //src/wrap:post_js)",
-        "-sASYNCIFY",
+        "-sASYNCIFY=1", # JSPI=off, Asyncify=on
+        "-sASYNCIFY_STACK_SIZE=1048576",  # 1 MiB
+        "-sENVIRONMENT=web",
         "-sEXPORT_ES6",
         "-sMODULARIZE",
         "-sWASM_BIGINT",
-        "-Wl,--wrap=read",
+
+        # Disable exceptions.
+        # Once JSPI is supported, exceptions can be enabled.
+        "-fno-exceptions",
+
+        # Wrapped syscalls:
         "-L${EXT_BUILD_ROOT}/$(dirname $(execpath //src/wrap))",
         "-lwrap",
+        "-Wl,--wrap=read",
+
+        # TODO: Enable the below in -c dbg builds only!
+        #"-sABORT_ON_WASM_EXCEPTIONS",
+        "-sASSERTIONS",
+        "-sASYNCIFY_DEBUG=1",
     ])),
 }
 
 CONFIG = "//pkg/busybox/config"
 
 configure_make(
-    name = "busybox.build",
+    name = "busybox.pkg",
     args = select({
         "@platforms//cpu:wasm32": keyval(ARGS, EM_ARGS),
         "//conditions:default": keyval(ARGS, K8_ARGS),
