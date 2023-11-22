@@ -22,7 +22,9 @@ pub struct ProcessManager {
 
 struct Process {
     state: Rc<(Mutex<State>, Condvar)>,
-    output: Rc<AsyncIo>,
+
+    istream: Rc<AsyncIo>,
+    ostream: Rc<AsyncIo>,
 
     #[allow(dead_code)]
     closures: ProcClosures,
@@ -76,7 +78,7 @@ impl ProcessManager {
     /// Waits until a process produces output.
     pub async fn wait_output(&self, pid: u32) -> Result<Option<Vec<JsValue>>, Error> {
         match self.map.get(&pid) {
-            Some(p) => p.output.wait().await,
+            Some(p) => p.ostream.wait().await,
             None => Err(Error::new(&format!("no such process: {}", pid))),
         }
     }
@@ -109,7 +111,8 @@ impl Process {
     ) -> Result<Self, Error> {
         let mut closures = ProcClosures::new();
 
-        let output = Rc::new(AsyncIo::new(p_defer));
+        let istream = Rc::new(AsyncIo::new(p_defer.clone()));
+        let ostream = Rc::new(AsyncIo::new(p_defer.clone()));
         let state = Rc::new((Mutex::new(State::Init), Condvar::new()));
 
         let args_builder = js::Builder::new()
@@ -118,10 +121,10 @@ impl Process {
         closures.add(args_builder.set_ref("os.set_module", ProcClosures::set_module())?);
         closures.add(args_builder.set_ref("os.init_module", ProcClosures::init_module())?);
         closures.add(args_builder.set_ref("os.init_runtime", ProcClosures::init_runtime())?);
-        closures.add(args_builder.set_ref("os.read", ProcClosures::read())?);
-        closures.add(args_builder.set_ref("print", ProcClosures::print(&output))?);
-        closures.add(args_builder.set_ref("printErr", ProcClosures::print(&output))?);
-        closures.add(args_builder.set_ref("exit", ProcClosures::exit(&state, &output))?);
+        closures.add(args_builder.set_ref("os.read", ProcClosures::read(&istream))?);
+        closures.add(args_builder.set_ref("print", ProcClosures::print(&ostream))?);
+        closures.add(args_builder.set_ref("printErr", ProcClosures::print(&ostream))?);
+        closures.add(args_builder.set_ref("exit", ProcClosures::exit(&state, &ostream))?);
 
         let new_state = match module.call1(&JsValue::null(), &args_builder.into()) {
             Ok(result) => {
@@ -152,7 +155,8 @@ impl Process {
 
         Ok(Self {
             state,
-            output,
+            istream,
+            ostream,
             closures,
         })
     }

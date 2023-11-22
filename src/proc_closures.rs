@@ -1,7 +1,7 @@
 use js_sys::{Function, JsString, Object, Promise, Reflect};
 use std::rc::Rc;
 use std::sync::{Condvar, Mutex};
-use wasm_bindgen::{closure::Closure, JsValue};
+use wasm_bindgen::closure::Closure;
 
 use crate::async_io::AsyncIo;
 use crate::js;
@@ -51,14 +51,18 @@ impl ProcClosures {
         Closure::new(move || {})
     }
 
-    pub fn read() -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
-        Closure::new(|fd: i32, _buf: u32, _count: u32| -> Promise {
-            // TODO: Hook up the i/o.
-            // For now, we just return a promise that leaks, but closes stdin.
-            Promise::new(&mut |res: Function, _: Function| {
-                if let Err(_) = res.call1(&JsValue::null(), &0.into()) {
-                    js::log(&format!("proc: fd {}: read error", fd));
-                }
+    pub fn read(io: &Rc<AsyncIo>) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
+        let _channel = io.clone();
+
+        // TODO: Refactor AsyncIo, add a lower-level interface.
+        // Instead of blocking, it should return the promise directly to be used here.
+        Closure::new(|_fd: i32, _buf: u32, _count: u32| -> Promise {
+            // Create a deferred object (p-defer).
+            // Send back the resolve function via a back-channel.
+            // (It will be resolved when data comes in from the terminal.)
+            // Return the promise.
+            Promise::new(&mut |_res: Function, _: Function| {
+                // Never resolve.
             })
         })
     }
@@ -73,6 +77,8 @@ impl ProcClosures {
         })
     }
 
+    // TODO: This doesn't really need a mutex/condvar combo.
+    // Refactor the code to use either a promise or a ref cell.
     pub fn exit(state: &Rc<(Mutex<State>, Condvar)>, io: &Rc<AsyncIo>) -> Closure<dyn Fn(i32)> {
         let channel = io.clone();
         let state = Rc::clone(&state);
