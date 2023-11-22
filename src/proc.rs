@@ -23,6 +23,8 @@ pub struct ProcessManager {
 struct Process {
     state: Rc<(Mutex<State>, Condvar)>,
     output: Rc<AsyncIo>,
+
+    #[allow(dead_code)]
     closures: Closures,
 }
 
@@ -109,7 +111,12 @@ impl Process {
             args_js.set(i as u32, JsString::from(*arg).into());
         }
 
-        let mod_args = Object::new();
+        let os_arg = Object::new();
+        let mod_args: Object = js::Builder::new()
+            .set("thisProgram", &name.into())?
+            .set("arguments", &args_js.into())?
+            .set("os", &os_arg)?
+            .into();
 
         let mut closures = Closures::new();
         let output = Rc::new(AsyncIo::new(p_defer));
@@ -159,12 +166,6 @@ impl Process {
             Reflect::set(&mod_args, &"quit".into(), &c.as_ref())?;
             c
         });
-
-        let os_arg = Object::new();
-
-        Reflect::set(&mod_args, &"thisProgram".into(), &name.into())?;
-        Reflect::set(&mod_args, &"arguments".into(), &args_js.into())?;
-        Reflect::set(&mod_args, &"os".into(), &os_arg)?;
 
         closures.add({
             let c: Closure<dyn Fn(_)> = Closure::new(move |_module: Object| {

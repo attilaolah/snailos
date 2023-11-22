@@ -1,4 +1,4 @@
-use js_sys::{eval, Error, Function, Promise, Reflect, JSON::stringify};
+use js_sys::{eval, Error, Function, Object, Promise, Reflect, JSON::stringify};
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -42,4 +42,25 @@ pub async fn load_module(path: &str) -> Result<Function, Error> {
     .into();
 
     Ok(Reflect::get(&JsFuture::from(promise).await?, &"default".into())?.into())
+}
+
+pub struct Builder {
+    obj: Object,
+}
+
+impl Builder {
+    pub fn new() -> Self {
+        Self { obj: Object::new() }
+    }
+
+    pub fn set(self, name: &str, value: &JsValue) -> Result<Self, Error> {
+        Reflect::set(&self.obj, &JsValue::from_str(name), value)?;
+        Ok(self)
+    }
+}
+
+impl Into<Object> for Builder {
+    fn into(self) -> Object {
+        self.obj
+    }
 }
