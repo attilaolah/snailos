@@ -69,14 +69,6 @@ impl Builder {
     where
         T: Into<JsValue>,
     {
-        self.set_item(key, value)?;
-        Ok(self)
-    }
-
-    fn set_item<T>(&self, key: &str, value: T) -> Result<(), Error>
-    where
-        T: Into<JsValue>,
-    {
         let mut current = self.obj.clone();
         let parts: Vec<&str> = key.split('.').collect();
 
@@ -102,7 +94,7 @@ impl Builder {
             &value.into(),
         )?;
 
-        Ok(())
+        Ok(self)
     }
 }
 

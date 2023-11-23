@@ -128,13 +128,13 @@ impl Process {
         let module_args = js::Builder::new()
             .set("thisProgram", name)?
             .set("arguments", js::str_array(arguments))?
+            .set("print", callbacks.print.as_ref())?
+            .set("printErr", callbacks.print.as_ref())?
+            .set("exit", callbacks.exit.as_ref())?
             .set("os.set_module", callbacks.set_module.as_ref())?
             .set("os.init_module", callbacks.init_module.as_ref())?
             .set("os.init_runtime", callbacks.init_runtime.as_ref())?
-            .set("os.read", callbacks.read.as_ref())?
-            .set("print", callbacks.print.as_ref())?
-            .set("printErr", callbacks.print.as_ref())?
-            .set("exit", callbacks.exit.as_ref())?;
+            .set("os.read", callbacks.read.as_ref())?;
 
         let new_state = match module.call1(&JsValue::null(), &module_args.into()) {
             Ok(result) => {
