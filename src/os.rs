@@ -2,7 +2,8 @@ use js_sys::{Error, Reflect};
 use wasm_bindgen::JsValue;
 
 use crate::compilation_mode::COMPILATION_MODE;
-use crate::proc::ProcessManager;
+use crate::js;
+use crate::proc::{ProcessManager, STDOUT_FILENO};
 use crate::term::Terminal;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -19,42 +20,42 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 // /usr/wasm/cid.wasm is the WASM binary that it loads, where "cid" is the content ID.
 
 pub struct OS {
-    proc: ProcessManager,
     term: Terminal,
+    proc: ProcessManager,
 }
 
 impl OS {
     pub fn new(config: JsValue) -> Result<Self, Error> {
-        let proc = ProcessManager::new(
-            //Reflect::get(&config, &"import".into())?.into(),
-            Reflect::get(&config, &"pDefer".into())?.into(),
-        );
-        let term = Terminal::new(
-            Reflect::get(&config, &"Terminal".into())?.into(),
-            Reflect::get(&config, &"FitAddon".into())?.into(),
-        )?;
+        js::p_defer_init(Reflect::get(&config, &"pDefer".into())?.into());
 
-        Ok(Self { proc, term })
+        Ok(Self {
+            proc: ProcessManager::new(),
+            term: Terminal::new(
+                Reflect::get(&config, &"Terminal".into())?.into(),
+                Reflect::get(&config, &"FitAddon".into())?.into(),
+            )?,
+        })
     }
 
     pub async fn boot(&mut self) -> Result<(), Error> {
         self.term.open()?;
 
-        self.term.writeln(&format!(
-            "_@/\" OS {}-{}, booting…",
-            VERSION, COMPILATION_MODE,
-        ))?;
-        self.term.writeln("")?;
+        self.term
+            .writeln(&format!("_@/\" OS {}-{}, booting…", VERSION, COMPILATION_MODE).as_bytes())?;
+        self.term.writeln(b"")?;
 
         let pid = self.proc.exec("/bin/busybox", &["hush"]).await?;
-        while let Some(output) = self.proc.wait_output(pid).await? {
-            for chunk in output {
-                self.term.writeln(&chunk.as_string().unwrap())?;
+
+        // TODO: Merge stdout and stderr!
+        // For now, let's just display the output of stdout.
+        while let Some(chunks) = self.proc.wait_data(pid, STDOUT_FILENO).await? {
+            for chunk in chunks.into_iter() {
+                self.term.writeln(chunk.as_slice())?;
             }
         }
 
-        self.term
-            .writeln(&format!("\r\nEXIT {}", self.proc.wait_quit(pid).await?))?;
-        Ok(())
+        let exit_code = self.proc.wait_quit(pid).await?;
+        self.term.writeln(b"")?;
+        self.term.writeln(&format!("EXIT {}", exit_code).as_bytes())
     }
 }

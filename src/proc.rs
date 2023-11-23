@@ -1,32 +1,28 @@
-use std::{
-    collections::HashMap,
-    ops::Deref,
-    rc::Rc,
-    sync::{Condvar, Mutex},
-};
+use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 
 use js_sys::{Error, Function, JsString, Object, Promise, Reflect};
-use wasm_bindgen::{closure::Closure, JsValue};
+use wasm_bindgen::{closure::Closure, throw_val, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
-use crate::compilation_mode::unexpected;
+
 use crate::js;
+
+// TODO: Include from libc?
+pub const STDOUT_FILENO: u32 = 1;
+pub const STDERR_FILENO: u32 = 2;
 
 pub struct ProcessManager {
     cnt: u32,
     map: HashMap<u32, Process>,
-    p_defer: Function,
-
     binfs: BinFs,
 }
 
 struct Process {
-    state: Rc<(Mutex<State>, Condvar)>,
-
-    istream: Rc<AsyncIo>,
-    ostream: Rc<AsyncIo>,
+    id: u32,
+    state: Rc<RefCell<State>>,
+    io: Rc<AsyncIo>,
 
     #[allow(dead_code)]
     callbacks: Callbacks,
@@ -38,23 +34,20 @@ struct Callbacks {
     init_runtime: Closure<dyn Fn()>,
     read: Closure<dyn Fn(i32, u32, u32) -> Promise>,
     print: Closure<dyn Fn(JsString)>,
-    exit: Closure<dyn Fn(i32)>,
+    print_err: Closure<dyn Fn(JsString)>,
+    exit: Closure<dyn FnMut(i32)>,
 }
 
 pub enum State {
-    Init,
-    InitFailed,
-    Waiting(JsFuture),
-    Running,
+    Running(js::Deferred),
     Exited(i32),
 }
 
 impl ProcessManager {
-    pub fn new(p_defer: Function) -> Self {
+    pub fn new() -> Self {
         Self {
             cnt: 1,
             map: HashMap::new(),
-            p_defer,
             binfs: BinFs::new("/bin"),
         }
     }
@@ -69,7 +62,9 @@ impl ProcessManager {
 
         let module = js::load_module(&resolved_path.to_string_lossy().to_string()).await?;
 
+        let pid = self.next_pid();
         let p = Process::new(
+            pid,
             module,
             &resolved_path
                 .file_stem()
@@ -77,21 +72,21 @@ impl ProcessManager {
                 .to_string_lossy()
                 .to_string(),
             args,
-            self.p_defer.clone(),
         )?;
 
-        let pid = self.next_pid();
         self.map.entry(pid).or_insert(p);
 
         Ok(pid)
     }
 
-    /// Waits until a process produces output.
-    pub async fn wait_output(&self, pid: u32) -> Result<Option<Vec<JsValue>>, Error> {
-        match self.map.get(&pid) {
-            Some(p) => p.ostream.wait().await,
-            None => Err(Error::new(&format!("no such process: {}", pid))),
-        }
+    /// Waits until a process produces output on a file descriptor.
+    pub async fn wait_data(&self, pid: u32, fd: u32) -> Result<Option<Vec<Vec<u8>>>, Error> {
+        self.map
+            .get(&pid)
+            .ok_or(Error::new(&format!("no such process: {}", pid)))?
+            .io
+            .read_all(fd)
+            .await
     }
 
     /// Waits until a process exits, returning its exit code.
@@ -113,17 +108,15 @@ impl ProcessManager {
 }
 
 impl Process {
-    fn new(
-        module: Function,
-        name: &str,
-        arguments: &[&str],
-        // TODO: Find a better place for this.
-        p_defer: Function,
-    ) -> Result<Self, Error> {
-        let state = Rc::new((Mutex::new(State::Init), Condvar::new()));
-        let istream = Rc::new(AsyncIo::new(p_defer.clone()));
-        let ostream = Rc::new(AsyncIo::new(p_defer.clone()));
-        let callbacks = Callbacks::new(&state, &istream, &ostream);
+    fn new(id: u32, module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
+        let state = Rc::new(RefCell::new(State::Running(js::deferred()?)));
+        let io = Rc::new({
+            let mut io = AsyncIo::new();
+            io.open(STDOUT_FILENO)?;
+            io.open(STDERR_FILENO)?;
+            io
+        });
+        let callbacks = Callbacks::new(&state, &io);
 
         let module_args = js::Builder::new()
             .set("thisProgram", name)?
@@ -136,96 +129,40 @@ impl Process {
             .set("os.init_runtime", callbacks.init_runtime.as_ref())?
             .set("os.read", callbacks.read.as_ref())?;
 
-        let new_state = match module.call1(&JsValue::null(), &module_args.into()) {
-            Ok(result) => {
-                let promise: Promise = result.into();
-                State::Waiting(JsFuture::from(promise))
-            }
-            Err(err) => {
-                js::error(&format!("proc: exec failed: {:?}", err));
-                State::InitFailed
-            }
-        };
-
-        // NOTE: At this point the module has started running the code.
-        // If there is nothing blocking it, it might have already quit!
-
-        let running_state = Rc::clone(&state);
-        let (lock, _) = &*running_state;
-        match lock.lock() {
-            Ok(mut guard) => match *guard {
-                State::Init => {
-                    *guard = new_state;
-                }
-                State::Exited(_) | State::InitFailed => (),
-                _ => js::error("proc: new: unexpected state"),
-            },
-            Err(_) => js::error("proc: new: mutex poisoned"),
-        }
+        let _promise: Promise = module.call1(&JsValue::null(), &module_args.into())?.into();
+        // TODO: js::spawn(promise)
 
         Ok(Self {
+            id,
             state,
-            istream,
-            ostream,
+            io,
             callbacks,
         })
     }
 
     /// Waits until the program exits and returns its exit code.
-    async fn wait(&mut self) -> Result<i32, Error> {
-        let (lock, cvar) = &*self.state;
-
-        // First one to lock should get the future and wait on it.
-        // Any subsequent calls should get the exit code and return it.
-        match lock.lock() {
-            Ok(mut guard) => match &mut *guard {
-                // We're in the first call, extract the future from the mutex.
-                State::Waiting(_) => match std::mem::replace(&mut *guard, State::Running) {
-                    State::Waiting(future) => future,
-                    // This should never happen, since we already matched on the type above.
-                    _ => return unexpected("unexpected state: !waiting while waiting"),
-                },
-                // Some other caller is already executing the mutex. Wait for the exit signal.
-                State::Running => match cvar.wait(guard) {
-                    Ok(mut guard) => match &mut *guard {
-                        // The conditional var should only be triggered by the exit callback.
-                        State::Exited(exit_code) => return Ok(*exit_code),
-                        _ => return unexpected("state: !exited after cvar notify"),
-                    },
-                    Err(_) => return unexpected("mutex poisoned after cvar notify"),
-                },
-                State::Exited(exit_code) => return Ok(*exit_code),
-                State::Init => return unexpected("state: init"),
-                State::InitFailed => return unexpected("state: init failed"),
-            },
-            Err(_) => return unexpected("mutex poisoned"),
+    async fn wait(&self) -> Result<i32, Error> {
+        if let State::Running(def) = self.state.borrow().deref() {
+            JsFuture::from(def.promise()).await?;
         }
-        .await?;
 
-        // If we're here, that means we were in the first call.
-        // Any subsequent attempt to acquire the lock shoulod yield the exit code.
-        // If it doesn't, that means quit() was not called, so we return -1 instead.
-        match lock.lock().unwrap().deref() {
-            State::Running => Ok(-1), // zombie process
-            State::Exited(exit_code) => Ok(*exit_code),
-            _ => return unexpected("state: !exited && !running after running"),
+        match self.state.borrow().deref() {
+            State::Exited(code) => Ok(*code),
+            _ => Err(Error::new(&format!("proc: pid {}: zombie", self.id))),
         }
     }
 }
 
 impl Callbacks {
-    fn new(
-        state: &Rc<(Mutex<State>, Condvar)>,
-        istream: &Rc<AsyncIo>,
-        ostream: &Rc<AsyncIo>,
-    ) -> Self {
+    fn new(state: &Rc<RefCell<State>>, io: &Rc<AsyncIo>) -> Self {
         Self {
             set_module: Self::set_module(),
             init_module: Self::init_module(),
             init_runtime: Self::init_runtime(),
-            read: Self::read(istream),
-            print: Self::print(ostream),
-            exit: Self::exit(state, ostream),
+            read: Self::read(io.clone()),
+            print: Self::print(io.clone(), STDOUT_FILENO),
+            print_err: Self::print(io.clone(), STDERR_FILENO),
+            exit: Self::exit(state.clone(), io.clone()),
         }
     }
 
@@ -256,59 +193,42 @@ impl Callbacks {
         Closure::new(move || {})
     }
 
-    pub fn read(istream: &Rc<AsyncIo>) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
-        let _channel = istream.clone();
-
-        // TODO: Refactor AsyncIo, add a lower-level interface.
-        // Instead of blocking, it should return the promise directly to be used here.
-        Closure::new(|_fd: i32, _buf: u32, _count: u32| -> Promise {
-            // Create a deferred object (p-defer).
-            // Send back the resolve function via a back-channel.
-            // (It will be resolved when data comes in from the terminal.)
-            // Return the promise.
-            Promise::new(&mut |_res: Function, _: Function| {
-                // Never resolve.
-            })
+    pub fn read(_io: Rc<AsyncIo>) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
+        Closure::new(move |fd: i32, _buf: u32, _count: u32| -> Promise {
+            match u32::try_from(fd) {
+                Err(_) => Promise::new(&mut |res: Function, _: Function| {
+                    js::error(&format!("proc: fd {}: read failed", fd));
+                    if let Err(err) = res.call1(&JsValue::null(), &(-1).into()) {
+                        throw_val(err);
+                    }
+                }),
+                // TODO: Return io.promise_read().then(……)?
+                Ok(fd) => Promise::new(&mut |_res: Function, _: Function| {
+                    js::warn(&format!("proc: fd {}: read: not implemented", fd));
+                    // Never resolve.
+                }),
+            }
         })
     }
 
-    pub fn print(ostream: &Rc<AsyncIo>) -> Closure<dyn Fn(JsString)> {
-        let channel = ostream.clone();
-
+    pub fn print(io: Rc<AsyncIo>, fd: u32) -> Closure<dyn Fn(JsString)> {
         Closure::new(move |text: JsString| {
-            if let Err(_) = channel.send(text.into()) {
-                js::error("proc: write failed")
+            if let Err(_) = io.write_string(fd, text) {
+                js::error(&format!("proc: fd {}: write failed", fd));
             }
         })
     }
 
-    // TODO: This doesn't really need a mutex/condvar combo.
-    // Refactor the code to use either a promise or a ref cell.
-    pub fn exit(
-        state: &Rc<(Mutex<State>, Condvar)>,
-        ostream: &Rc<AsyncIo>,
-    ) -> Closure<dyn Fn(i32)> {
-        let channel = ostream.clone();
-        let state = Rc::clone(&state);
-
-        Closure::new(move |code: i32| {
-            let (lock, cvar) = &*state;
-            match lock.lock() {
-                Ok(mut state) => {
-                    if let State::Exited(_) = *state {
-                        // This happens when quit() is called more than once.
-                        // This seems to happen due to Emscripten's Asyncify rewinding.
-                        js::warn("proc: quit: called more than once");
-                        return;
-                    }
-                    if let Err(_) = channel.close() {
-                        js::error("proc: quit: failed to close output");
-                    }
-                    *state = State::Exited(code);
-                    cvar.notify_all();
+    pub fn exit(state: Rc<RefCell<State>>, io: Rc<AsyncIo>) -> Closure<dyn FnMut(i32)> {
+        Closure::new(move |code: i32| match state.borrow().deref() {
+            State::Running(def) => {
+                RefCell::swap(state.as_ref(), &State::Exited(code).into());
+                if let Err(_) = io.close_all() {
+                    js::error("proc: failed to close file descriptors")
                 }
-                Err(_) => js::error("proc: quit: mutex poisoned"),
+                def.resolve(&JsValue::null());
             }
+            State::Exited(_) => js::error("proc: exit called more than once"),
         })
     }
 }

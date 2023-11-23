@@ -1,26 +1,25 @@
-use js_sys::{eval, Array, Error, Function, JsString, Object, Promise, Reflect, JSON::stringify};
+use std::cell::RefCell;
+
+use js_sys::{
+    eval, Array, Error, Function, JsString, Object, Promise, Reflect, Uint8Array, JSON::stringify,
+};
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
+use web_sys::HtmlElement;
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen]
-    pub type Terminal;
+    pub type Deferred;
 
     #[wasm_bindgen(method)]
-    pub fn open(this: &Terminal, parent: &JsValue);
-
-    #[wasm_bindgen(method, js_name = loadAddon)]
-    pub fn load_addon(this: &Terminal, addon: &JsValue);
+    pub fn resolve(this: &Deferred, value: &JsValue);
 
     #[wasm_bindgen(method)]
-    pub fn write(this: &Terminal, data: &JsValue, callback: JsValue);
+    pub fn reject(this: &Deferred, value: &JsValue);
 
-    #[wasm_bindgen]
-    pub type FitAddon;
-
-    #[wasm_bindgen(method)]
-    pub fn fit(this: &FitAddon);
+    #[wasm_bindgen(method, getter)]
+    pub fn promise(this: &Deferred) -> Promise;
 
     #[wasm_bindgen(js_namespace = console)]
     pub fn log(s: &str);
@@ -30,6 +29,46 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = console)]
     pub fn error(s: &str);
+
+    #[wasm_bindgen]
+    pub type Terminal;
+
+    #[wasm_bindgen(method, catch)]
+    pub fn open(this: &Terminal, parent: &HtmlElement) -> Result<(), JsValue>;
+
+    #[wasm_bindgen(method, catch, js_name = loadAddon)]
+    pub fn load_fit_addon(this: &Terminal, addon: &FitAddon) -> Result<(), JsValue>;
+
+    #[wasm_bindgen(method, catch)]
+    pub fn write(this: &Terminal, data: &Uint8Array) -> Result<(), JsValue>;
+
+    #[wasm_bindgen(method, catch, js_name = write)]
+    pub fn write_with_callback(
+        this: &Terminal,
+        data: &Uint8Array,
+        callback: Function,
+    ) -> Result<(), JsValue>;
+
+    #[wasm_bindgen]
+    pub type FitAddon;
+
+    #[wasm_bindgen(method, catch)]
+    pub fn fit(this: &FitAddon) -> Result<(), JsValue>;
+}
+
+thread_local! {
+pub static P_DEFER: RefCell<Option<Function>> = RefCell::new(None);
+}
+
+pub fn p_defer_init(p_defer: Function) {
+    P_DEFER.with(|rc| *rc.borrow_mut() = Some(p_defer));
+}
+
+pub fn deferred() -> Result<Deferred, Error> {
+    Ok(P_DEFER
+        .with(|rc| rc.borrow().as_ref().map(|f| f.call0(&JsValue::null())))
+        .expect("deferred: not ready")?
+        .into())
 }
 
 pub async fn load_module(path: &str) -> Result<Function, Error> {
@@ -51,6 +90,14 @@ pub fn str_array(items: &[&str]) -> Array {
     }
     array
 }
+
+//pub fn encode_str(input: &str) -> Result<Vec<u8>, Error> {
+//    Ok(TextEncoder::new()?.encode_with_input(input))
+//}
+
+//pub fn encode_string(input: JsString) -> Result<Vec<u8>, Error> {
+//    encode_str(&input.as_string().unwrap())
+//}
 
 /// Object builder.
 pub struct Builder {
