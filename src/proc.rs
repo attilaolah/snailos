@@ -111,12 +111,10 @@ impl ProcessManager {
 impl Process {
     fn new(id: u32, module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
         let state = Rc::new(RefCell::new(State::Running(js::deferred()?)));
-        let io = Rc::new({
-            let mut io = AsyncIo::new();
-            io.open(STDOUT_FILENO)?;
-            io.open(STDERR_FILENO)?;
-            io
-        });
+        let io = Rc::new(AsyncIo::new());
+        io.open(STDOUT_FILENO)?;
+        io.open(STDERR_FILENO)?;
+
         let callbacks = Callbacks::new(&state, &io);
         let promise: Promise = module
             .call1(
@@ -125,6 +123,7 @@ impl Process {
                     .set("thisProgram", name)?
                     .set("arguments", js::str_array(arguments))?
                     .set("print", callbacks.print.as_ref())?
+                    // TODO: Connect to print_err. For now we do 2>&1.
                     .set("printErr", callbacks.print.as_ref())?
                     .set("exit", callbacks.exit.as_ref())?
                     .set("os.set_module", callbacks.set_module.as_ref())?
