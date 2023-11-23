@@ -4,6 +4,7 @@ use std::{
         hash_map::Entry::{Occupied, Vacant},
         HashMap, VecDeque,
     },
+    rc::Rc,
 };
 
 use js_sys::{Error, JsString, Promise};
@@ -19,8 +20,8 @@ use crate::js;
 /// soon as one producer closes the channel, no more data can be sent. Once the buffer is drained,
 /// the channel is removed and can be re-opened.
 pub struct AsyncIo {
-    // Internal I/O buffer. Keyed by file descriptors.
-    queue: HashMap<u32, AsyncBuffer>,
+    // Internal I/O buffers, keyed by file descriptors.
+    buffers: RefCell<HashMap<u32, Rc<AsyncBuffer>>>,
     // TextEncoder used for encoding strings.
     encoder: Option<TextEncoder>,
 }
@@ -31,13 +32,13 @@ struct AsyncBuffer {
     // Deferred object, waiting for data to become available.
     deferred: RefCell<Option<js::Deferred>>,
     // Whether the file descriptor is open.
-    closed: bool,
+    closed: RefCell<bool>,
 }
 
 impl AsyncIo {
     pub fn new() -> Self {
         Self {
-            queue: HashMap::new(),
+            buffers: RefCell::new(HashMap::new()),
             encoder: None,
         }
     }
@@ -45,11 +46,11 @@ impl AsyncIo {
     /// Opens a file descriptor.
     ///
     /// Returns an error if the file descriptor is already open.
-    pub fn open(&mut self, fd: u32) -> Result<(), Error> {
-        match self.queue.entry(fd) {
+    pub fn open(&self, fd: u32) -> Result<(), Error> {
+        match self.buffers.borrow_mut().entry(fd) {
             Occupied(_) => Err(Error::new(&format!("open: fd {}: already open", fd))),
             Vacant(v) => {
-                v.insert(AsyncBuffer::new());
+                v.insert(AsyncBuffer::new().into());
                 Ok(())
             }
         }
@@ -69,11 +70,15 @@ impl AsyncIo {
     ///
     /// This can be more efficient as the data is returned in chunks and no copy needs to be done.
     pub async fn read_all(&self, fd: u32) -> Result<Option<Vec<Vec<u8>>>, Error> {
-        self.queue
-            .get(&fd)
-            .ok_or(Error::new(&format!("read_all: fd {}: not open", fd)))?
-            .read_all()
-            .await
+        {
+            self.buffers
+                .borrow() // returned before await
+                .get(&fd)
+                .ok_or(Error::new(&format!("read_all: fd {}: not open", fd)))?
+                .clone()
+        }
+        .read_all()
+        .await
     }
 
     /// Read from the file descriptor.
@@ -91,7 +96,8 @@ impl AsyncIo {
     /// If there is a consumer connected, some data might be delivered immediately, otherwise, the
     /// data is buffered.
     pub fn write(&self, fd: u32, data: Vec<u8>) -> Result<u32, Error> {
-        self.queue
+        self.buffers
+            .borrow()
             .get(&fd)
             .ok_or(Error::new(&format!("write: fd {}: not open", fd)))?
             .write(data)
@@ -112,13 +118,22 @@ impl AsyncIo {
     }
 
     /// Closes the file descriptor, indicating that no more data can be sent.
-    pub fn close(&self, _fd: u32) -> Result<(), Error> {
-        todo!();
+    pub fn close(&self, fd: u32) -> Result<(), Error> {
+        match self.buffers.borrow_mut().remove(&fd) {
+            Some(buf) => Ok(buf.close()),
+            None => Err(Error::new(&format!("close: fd {}: not open", fd))),
+        }
     }
 
     /// Closes all file descriptors.
     pub fn close_all(&self) -> Result<(), Error> {
-        todo!();
+        let mut buffers = self.buffers.borrow_mut();
+        for buf in buffers.values() {
+            buf.close();
+        }
+        buffers.clear();
+
+        Ok(())
     }
 }
 
@@ -127,7 +142,7 @@ impl AsyncBuffer {
         Self {
             buffer: RefCell::new(VecDeque::new()),
             deferred: RefCell::new(None),
-            closed: false,
+            closed: RefCell::new(false),
         }
     }
 
@@ -150,7 +165,7 @@ impl AsyncBuffer {
             return Ok(Some(self.buffer.borrow_mut().drain(..).collect()));
         }
 
-        if self.closed {
+        if *self.closed.borrow() {
             // The buffer is drained and the channel is closed.
             // Indicate that there is no more data by returning None.
             return Ok(None);
@@ -174,8 +189,8 @@ impl AsyncBuffer {
     /// If there is a consumer connected, some data might be delivered immediately, otherwise, the
     /// data is buffered.
     fn write(&self, data: Vec<u8>) -> Result<u32, Error> {
-        if self.closed {
-            return Err(Error::new("channel closed"));
+        if *self.closed.borrow() {
+            return Err(Error::new("stream closed"));
         }
 
         let result = data.len() as u32;
@@ -187,11 +202,9 @@ impl AsyncBuffer {
 
     /// Blocks until someone calls signal_write().
     async fn wait_read(&self) -> Result<(), Error> {
-        // Temporary borrow(), we need to release it immediately.
+        // Temporary borrow(), we need to release it before the await.
         // Otherwise someone calling signal_write() would fail to replace().
-        let opt = self.deferred.borrow().as_ref().map(|d| d.promise());
-
-        if let Some(promise) = opt {
+        if let Some(promise) = { self.deferred.borrow().as_ref().map(|d| d.promise()) } {
             // Now that the borrow is returned, we can block safely.
             JsFuture::from(promise).await?;
         }
@@ -204,5 +217,10 @@ impl AsyncBuffer {
         if let Some(def) = self.deferred.replace(None) {
             def.resolve(&JsValue::null());
         }
+    }
+
+    fn close(&self) {
+        self.closed.replace(true);
+        self.signal_write();
     }
 }

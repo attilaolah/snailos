@@ -91,14 +91,6 @@ pub fn str_array(items: &[&str]) -> Array {
     array
 }
 
-//pub fn encode_str(input: &str) -> Result<Vec<u8>, Error> {
-//    Ok(TextEncoder::new()?.encode_with_input(input))
-//}
-
-//pub fn encode_string(input: JsString) -> Result<Vec<u8>, Error> {
-//    encode_str(&input.as_string().unwrap())
-//}
-
 /// Object builder.
 pub struct Builder {
     obj: Object,

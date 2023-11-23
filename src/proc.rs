@@ -23,6 +23,7 @@ struct Process {
     id: u32,
     state: Rc<RefCell<State>>,
     io: Rc<AsyncIo>,
+    promise: Promise,
 
     #[allow(dead_code)]
     callbacks: Callbacks,
@@ -117,31 +118,35 @@ impl Process {
             io
         });
         let callbacks = Callbacks::new(&state, &io);
-
-        let module_args = js::Builder::new()
-            .set("thisProgram", name)?
-            .set("arguments", js::str_array(arguments))?
-            .set("print", callbacks.print.as_ref())?
-            .set("printErr", callbacks.print.as_ref())?
-            .set("exit", callbacks.exit.as_ref())?
-            .set("os.set_module", callbacks.set_module.as_ref())?
-            .set("os.init_module", callbacks.init_module.as_ref())?
-            .set("os.init_runtime", callbacks.init_runtime.as_ref())?
-            .set("os.read", callbacks.read.as_ref())?;
-
-        let _promise: Promise = module.call1(&JsValue::null(), &module_args.into())?.into();
-        // TODO: js::spawn(promise)
+        let promise: Promise = module
+            .call1(
+                &JsValue::null(),
+                &js::Builder::new()
+                    .set("thisProgram", name)?
+                    .set("arguments", js::str_array(arguments))?
+                    .set("print", callbacks.print.as_ref())?
+                    .set("printErr", callbacks.print.as_ref())?
+                    .set("exit", callbacks.exit.as_ref())?
+                    .set("os.set_module", callbacks.set_module.as_ref())?
+                    .set("os.init_module", callbacks.init_module.as_ref())?
+                    .set("os.init_runtime", callbacks.init_runtime.as_ref())?
+                    .set("os.read", callbacks.read.as_ref())?
+                    .into(),
+            )?
+            .into();
 
         Ok(Self {
             id,
             state,
             io,
+            promise,
             callbacks,
         })
     }
 
     /// Waits until the program exits and returns its exit code.
     async fn wait(&self) -> Result<i32, Error> {
+        JsFuture::from(self.promise.clone()).await?;
         if let State::Running(def) = self.state.borrow().deref() {
             JsFuture::from(def.promise()).await?;
         }
