@@ -202,9 +202,12 @@ impl AsyncBuffer {
 
     /// Blocks until someone calls signal_write().
     async fn wait_read(&self) -> Result<(), Error> {
-        // Temporary borrow(), we need to release it before the await.
-        // Otherwise someone calling signal_write() would fail to replace().
-        if let Some(promise) = { self.deferred.borrow().as_ref().map(|d| d.promise()) } {
+        if let Some(promise) = {
+            // Temporary borrow(), we need to release it before the await.
+            // Otherwise someone calling signal_write() would fail to replace() it.
+            let opt = self.deferred.borrow().as_ref().map(|d| d.promise());
+            opt
+        } {
             // Now that the borrow is returned, we can block safely.
             JsFuture::from(promise).await?;
         }
