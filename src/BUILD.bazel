@@ -17,7 +17,6 @@ rust_shared_library(
         "lib.rs",
         "os.rs",
         "proc.rs",
-        "proc_closures.rs",
         "term.rs",
     ],
     aliases = aliases(normal = True),

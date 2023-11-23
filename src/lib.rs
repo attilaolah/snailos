@@ -9,7 +9,6 @@ mod compilation_mode;
 mod js;
 mod os;
 mod proc;
-mod proc_closures;
 mod term;
 
 #[wasm_bindgen]

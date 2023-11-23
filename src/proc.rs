@@ -1,16 +1,18 @@
-use js_sys::{Error, Function, Promise};
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::rc::Rc;
-use std::sync::{Condvar, Mutex};
-use wasm_bindgen::JsValue;
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    rc::Rc,
+    sync::{Condvar, Mutex},
+};
+
+use js_sys::{Error, Function, JsString, Object, Promise, Reflect};
+use wasm_bindgen::{closure::Closure, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use crate::async_io::AsyncIo;
 use crate::binfs::BinFs;
 use crate::compilation_mode::unexpected;
 use crate::js;
-use crate::proc_closures::ProcClosures;
 
 pub struct ProcessManager {
     cnt: u32,
@@ -27,7 +29,16 @@ struct Process {
     ostream: Rc<AsyncIo>,
 
     #[allow(dead_code)]
-    closures: ProcClosures,
+    callbacks: Callbacks,
+}
+
+struct Callbacks {
+    set_module: Closure<dyn Fn(Object)>,
+    init_module: Closure<dyn Fn(Object, Object)>,
+    init_runtime: Closure<dyn Fn()>,
+    read: Closure<dyn Fn(i32, u32, u32) -> Promise>,
+    print: Closure<dyn Fn(JsString)>,
+    exit: Closure<dyn Fn(i32)>,
 }
 
 pub enum State {
@@ -109,24 +120,23 @@ impl Process {
         // TODO: Find a better place for this.
         p_defer: Function,
     ) -> Result<Self, Error> {
-        let mut closures = ProcClosures::new();
-
+        let state = Rc::new((Mutex::new(State::Init), Condvar::new()));
         let istream = Rc::new(AsyncIo::new(p_defer.clone()));
         let ostream = Rc::new(AsyncIo::new(p_defer.clone()));
-        let state = Rc::new((Mutex::new(State::Init), Condvar::new()));
+        let callbacks = Callbacks::new(&state, &istream, &ostream);
 
-        let args_builder = js::Builder::new()
+        let module_args = js::Builder::new()
             .set("thisProgram", name)?
-            .set("arguments", js::str_array(arguments))?;
-        closures.add(args_builder.set_ref("os.set_module", ProcClosures::set_module())?);
-        closures.add(args_builder.set_ref("os.init_module", ProcClosures::init_module())?);
-        closures.add(args_builder.set_ref("os.init_runtime", ProcClosures::init_runtime())?);
-        closures.add(args_builder.set_ref("os.read", ProcClosures::read(&istream))?);
-        closures.add(args_builder.set_ref("print", ProcClosures::print(&ostream))?);
-        closures.add(args_builder.set_ref("printErr", ProcClosures::print(&ostream))?);
-        closures.add(args_builder.set_ref("exit", ProcClosures::exit(&state, &ostream))?);
+            .set("arguments", js::str_array(arguments))?
+            .set("os.set_module", callbacks.set_module.as_ref())?
+            .set("os.init_module", callbacks.init_module.as_ref())?
+            .set("os.init_runtime", callbacks.init_runtime.as_ref())?
+            .set("os.read", callbacks.read.as_ref())?
+            .set("print", callbacks.print.as_ref())?
+            .set("printErr", callbacks.print.as_ref())?
+            .set("exit", callbacks.exit.as_ref())?;
 
-        let new_state = match module.call1(&JsValue::null(), &args_builder.into()) {
+        let new_state = match module.call1(&JsValue::null(), &module_args.into()) {
             Ok(result) => {
                 let promise: Promise = result.into();
                 State::Waiting(JsFuture::from(promise))
@@ -157,7 +167,7 @@ impl Process {
             state,
             istream,
             ostream,
-            closures,
+            callbacks,
         })
     }
 
@@ -200,5 +210,105 @@ impl Process {
             State::Exited(exit_code) => Ok(*exit_code),
             _ => return unexpected("state: !exited && !running after running"),
         }
+    }
+}
+
+impl Callbacks {
+    fn new(
+        state: &Rc<(Mutex<State>, Condvar)>,
+        istream: &Rc<AsyncIo>,
+        ostream: &Rc<AsyncIo>,
+    ) -> Self {
+        Self {
+            set_module: Self::set_module(),
+            init_module: Self::init_module(),
+            init_runtime: Self::init_runtime(),
+            read: Self::read(istream),
+            print: Self::print(ostream),
+            exit: Self::exit(state, ostream),
+        }
+    }
+
+    pub fn set_module() -> Closure<dyn Fn(Object)> {
+        Closure::new(move |_module: Object| {
+            // TODO: Set the module here!
+        })
+    }
+    pub fn init_module() -> Closure<dyn Fn(Object, Object)> {
+        Closure::new(|env: Object, fs: Object| {
+            if let Err(_) = Reflect::set(&env, &"USER".into(), &JsString::from("snail")) {
+                js::error("proc: module init: failed to set user");
+            }
+
+            // TODO: Write a JS binding for this!
+            let rename: Function = Reflect::get(&fs, &"rename".into()).unwrap().into();
+            if let Err(_) = rename.call2(
+                &fs,
+                &JsString::from("/home/web_user"),
+                &JsString::from("/home/snail"),
+            ) {
+                js::error("proc: module init: failed to rename home dir");
+            }
+        })
+    }
+
+    pub fn init_runtime() -> Closure<dyn Fn()> {
+        Closure::new(move || {})
+    }
+
+    pub fn read(istream: &Rc<AsyncIo>) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
+        let _channel = istream.clone();
+
+        // TODO: Refactor AsyncIo, add a lower-level interface.
+        // Instead of blocking, it should return the promise directly to be used here.
+        Closure::new(|_fd: i32, _buf: u32, _count: u32| -> Promise {
+            // Create a deferred object (p-defer).
+            // Send back the resolve function via a back-channel.
+            // (It will be resolved when data comes in from the terminal.)
+            // Return the promise.
+            Promise::new(&mut |_res: Function, _: Function| {
+                // Never resolve.
+            })
+        })
+    }
+
+    pub fn print(ostream: &Rc<AsyncIo>) -> Closure<dyn Fn(JsString)> {
+        let channel = ostream.clone();
+
+        Closure::new(move |text: JsString| {
+            if let Err(_) = channel.send(text.into()) {
+                js::error("proc: write failed")
+            }
+        })
+    }
+
+    // TODO: This doesn't really need a mutex/condvar combo.
+    // Refactor the code to use either a promise or a ref cell.
+    pub fn exit(
+        state: &Rc<(Mutex<State>, Condvar)>,
+        ostream: &Rc<AsyncIo>,
+    ) -> Closure<dyn Fn(i32)> {
+        let channel = ostream.clone();
+        let state = Rc::clone(&state);
+
+        Closure::new(move |code: i32| {
+            let (lock, cvar) = &*state;
+            match lock.lock() {
+                Ok(mut state) => {
+                    if let State::Exited(_) = *state {
+                        // This happens when quit() is called more than once.
+                        // This seems to happen due to Emscripten's Asyncify rewinding.
+                        js::warn("proc: quit: called more than once");
+                        return;
+                    }
+                    if let Err(_) = channel.close() {
+                        js::error("proc: quit: failed to close output");
+                    }
+                    *state = State::Exited(code);
+                    cvar.notify_all();
+                }
+                Err(_) => js::error("proc: quit: mutex poisoned"),
+            }
+        })
     }
 }

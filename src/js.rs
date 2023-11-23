@@ -1,5 +1,5 @@
 use js_sys::{eval, Array, Error, Function, JsString, Object, Promise, Reflect, JSON::stringify};
-use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 #[wasm_bindgen]
@@ -71,11 +71,6 @@ impl Builder {
     {
         self.set_item(key, value)?;
         Ok(self)
-    }
-
-    pub fn set_ref<T: ?Sized>(&self, key: &str, value: Closure<T>) -> Result<Closure<T>, Error> {
-        self.set_item(key, value.as_ref())?;
-        Ok(value)
     }
 
     fn set_item<T>(&self, key: &str, value: T) -> Result<(), Error>
