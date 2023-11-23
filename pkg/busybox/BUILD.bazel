@@ -46,9 +46,7 @@ EM_ARGS = {
         "-Wl,--wrap=read",
 
         # TODO: Enable the below in -c dbg builds only!
-        #"-sABORT_ON_WASM_EXCEPTIONS",
         "-sASSERTIONS",
-        "-sASYNCIFY_DEBUG=1",
     ])),
 }
 
