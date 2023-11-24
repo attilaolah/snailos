@@ -4,14 +4,11 @@ use js_sys::{Error, Function, JsString, Object, Promise, Reflect};
 use wasm_bindgen::{closure::Closure, throw_val, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-use crate::async_io::AsyncIo;
-use crate::binfs::BinFs;
-
-use crate::js;
-
-// TODO: Include from libc?
-pub const STDOUT_FILENO: u32 = 1;
-pub const STDERR_FILENO: u32 = 2;
+use crate::{
+    async_io::{AsyncIo, STDERR, STDOUT},
+    binfs::BinFs,
+    js,
+};
 
 pub struct ProcessManager {
     cnt: u32,
@@ -111,9 +108,7 @@ impl ProcessManager {
 impl Process {
     fn new(id: u32, module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
         let state = Rc::new(RefCell::new(State::Running(js::deferred()?)));
-        let io = Rc::new(AsyncIo::new());
-        io.open(STDOUT_FILENO)?;
-        io.open(STDERR_FILENO)?;
+        let io = Rc::new(AsyncIo::new()?);
 
         let callbacks = Callbacks::new(&state, &io);
         let promise: Promise = module
@@ -164,8 +159,8 @@ impl Callbacks {
             init_module: Self::init_module(),
             init_runtime: Self::init_runtime(),
             read: Self::read(io.clone()),
-            print: Self::print(io.clone(), STDOUT_FILENO),
-            print_err: Self::print(io.clone(), STDERR_FILENO),
+            print: Self::print(io.clone(), STDOUT),
+            print_err: Self::print(io.clone(), STDERR),
             exit: Self::exit(state.clone(), io.clone()),
         }
     }

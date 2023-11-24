@@ -1,10 +1,9 @@
 use js_sys::{Error, Reflect};
 use wasm_bindgen::JsValue;
 
-use crate::compilation_mode::COMPILATION_MODE;
-use crate::js;
-use crate::proc::{ProcessManager, STDOUT_FILENO};
-use crate::term::Terminal;
+use crate::{
+    async_io::STDOUT, compilation_mode::COMPILATION_MODE, js, proc::ProcessManager, term::Terminal,
+};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -48,7 +47,7 @@ impl OS {
 
         // TODO: Merge stdout and stderr!
         // For now, let's just display the output of stdout.
-        while let Some(chunks) = self.proc.wait_data(pid, STDOUT_FILENO).await? {
+        while let Some(chunks) = self.proc.wait_data(pid, STDOUT).await? {
             for chunk in chunks.into_iter() {
                 self.term.writeln(chunk.as_slice())?;
             }

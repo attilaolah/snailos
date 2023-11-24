@@ -10,9 +10,13 @@ use std::{
 use js_sys::{Error, JsString, Promise};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::TextEncoder;
 
 use crate::js;
+
+pub const STDIN: u32 = 0;
+pub const STDOUT: u32 = 1;
+pub const STDERR: u32 = 2;
+pub const OPEN_FDS: [u32; 3] = [STDIN, STDOUT, STDERR];
 
 /// Asynchronous, Promise-backed I/O with an infinite buffer.
 ///
@@ -22,8 +26,6 @@ use crate::js;
 pub struct AsyncIo {
     // Internal I/O buffers, keyed by file descriptors.
     buffers: RefCell<HashMap<u32, Rc<AsyncBuffer>>>,
-    // TextEncoder used for encoding strings.
-    encoder: Option<TextEncoder>,
 }
 
 struct AsyncBuffer {
@@ -36,11 +38,14 @@ struct AsyncBuffer {
 }
 
 impl AsyncIo {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self, Error> {
+        let io = Self {
             buffers: RefCell::new(HashMap::new()),
-            encoder: None,
+        };
+        for fd in OPEN_FDS {
+            io.open(fd)?;
         }
+        Ok(io)
     }
 
     /// Opens a file descriptor.
