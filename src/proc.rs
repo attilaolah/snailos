@@ -30,13 +30,20 @@ struct Process {
 }
 
 struct Callbacks {
-    set_module: Closure<dyn Fn(js::Module)>,
-    init_module: Closure<dyn Fn(Object, Object)>,
-    init_runtime: Closure<dyn Fn()>,
-    read: Closure<dyn Fn(i32, u32, u32) -> Promise>,
     print: Closure<dyn Fn(String)>,
     print_err: Closure<dyn Fn(String)>,
     exit: Closure<dyn FnMut(i32)>,
+
+    // OS init:
+    set_module: Closure<dyn Fn(js::Module)>,
+    init_module: Closure<dyn Fn(Object, Object)>,
+    init_runtime: Closure<dyn Fn()>,
+
+    // Mocked syscalls & library functions:
+    read: Closure<dyn Fn(i32, u32, u32) -> Promise>, // -> ssize_t = usize
+    vfork: Closure<dyn Fn() -> Promise>,             // -> pid_t = u32
+    wait4: Closure<dyn Fn(u32, u32, i32, u32) -> Promise>, // -> pid_t = u32
+    waitpid: Closure<dyn Fn(u32, u32, i32) -> Promise>, // -> pid_t = u32
 }
 
 pub enum State {
@@ -147,10 +154,15 @@ impl Process {
                     // TODO: Connect to print_err. For now we do 2>&1.
                     .set("printErr", callbacks.print.as_ref())?
                     .set("exit", callbacks.exit.as_ref())?
+                    // OS init:
                     .set("os.set_module", callbacks.set_module.as_ref())?
                     .set("os.init_module", callbacks.init_module.as_ref())?
                     .set("os.init_runtime", callbacks.init_runtime.as_ref())?
+                    // Mocked syscalls & functions:
                     .set("os.read", callbacks.read.as_ref())?
+                    .set("os.vfork", callbacks.vfork.as_ref())?
+                    .set("os.wait4", callbacks.wait4.as_ref())?
+                    .set("os.waitpid", callbacks.waitpid.as_ref())?
                     .into(),
             )?
             .into();
@@ -186,14 +198,40 @@ impl Callbacks {
         io: &Rc<AsyncIo>,
     ) -> Self {
         Self {
-            set_module: Self::set_module(module.clone()),
-            init_module: Self::init_module(),
-            init_runtime: Self::init_runtime(),
-            read: Self::read(module.clone(), io.clone()),
             print: Self::print(io.clone(), STDOUT),
             print_err: Self::print(io.clone(), STDERR),
             exit: Self::exit(state.clone(), io.clone()),
+
+            set_module: Self::set_module(module.clone()),
+            init_module: Self::init_module(),
+            init_runtime: Self::init_runtime(),
+
+            read: Self::read(module.clone(), io.clone()),
+            vfork: Self::vfork(),
+            wait4: Self::wait4(),
+            waitpid: Self::waitpid(),
         }
+    }
+
+    pub fn print(io: Rc<AsyncIo>, fd: u32) -> Closure<dyn Fn(String)> {
+        Closure::new(move |text: String| {
+            if let Err(_) = io.write(fd, text.as_bytes().to_vec()) {
+                js::error(&format!("proc: fd {}: write failed", fd));
+            }
+        })
+    }
+
+    pub fn exit(state: Rc<RefCell<State>>, io: Rc<AsyncIo>) -> Closure<dyn FnMut(i32)> {
+        Closure::new(move |code: i32| match state.borrow().deref() {
+            State::Running(def) => {
+                RefCell::swap(state.as_ref(), &State::Exited(code).into());
+                if let Err(_) = io.close_all() {
+                    js::error("proc: failed to close file descriptors")
+                }
+                def.resolve(&JsValue::null());
+            }
+            State::Exited(_) => js::error("proc: exit called more than once"),
+        })
     }
 
     pub fn set_module(module: Rc<RefCell<Option<js::Module>>>) -> Closure<dyn Fn(js::Module)> {
@@ -228,6 +266,9 @@ impl Callbacks {
         io: Rc<AsyncIo>,
     ) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
         Closure::new(move |fd: i32, buf: u32, count: u32| -> Promise {
+            #[cfg(feature = "dbg")]
+            js::log(&format!("proc: read({}, {}, {})?", fd, buf, count));
+
             // TODO: Remove this layer of indentation with if let/else.
             match u32::try_from(fd) {
                 Err(_) => Promise::reject(&format!("proc: fd {}: bad file descriptor", fd).into()),
@@ -239,24 +280,30 @@ impl Callbacks {
         })
     }
 
-    pub fn print(io: Rc<AsyncIo>, fd: u32) -> Closure<dyn Fn(String)> {
-        Closure::new(move |text: String| {
-            if let Err(_) = io.write(fd, text.as_bytes().to_vec()) {
-                js::error(&format!("proc: fd {}: write failed", fd));
-            }
+    pub fn vfork() -> Closure<dyn Fn() -> Promise> {
+        Closure::new(move || {
+            #[cfg(feature = "dbg")]
+            js::log("proc: vfork()?");
+
+            Promise::resolve(&1.into())
         })
     }
 
-    pub fn exit(state: Rc<RefCell<State>>, io: Rc<AsyncIo>) -> Closure<dyn FnMut(i32)> {
-        Closure::new(move |code: i32| match state.borrow().deref() {
-            State::Running(def) => {
-                RefCell::swap(state.as_ref(), &State::Exited(code).into());
-                if let Err(_) = io.close_all() {
-                    js::error("proc: failed to close file descriptors")
-                }
-                def.resolve(&JsValue::null());
-            }
-            State::Exited(_) => js::error("proc: exit called more than once"),
+    pub fn wait4() -> Closure<dyn Fn(u32, u32, i32, u32) -> Promise> {
+        Closure::new(move |pid, status, options, rusage| {
+            #[cfg(feature = "dbg")]
+            js::log(&format!("proc: wait4({}, {}, {}, {})?", pid, status, options, rusage));
+
+            Promise::resolve(&(-1).into())
+        })
+    }
+
+    pub fn waitpid() -> Closure<dyn Fn(u32, u32, i32) -> Promise> {
+        Closure::new(move |pid, status, options| {
+            #[cfg(feature = "dbg")]
+            js::log(&format!("proc: waitpid({}, {}, {})?", pid, status, options));
+
+            Promise::resolve(&1.into())
         })
     }
 }

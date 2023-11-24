@@ -20,6 +20,12 @@ busybox_config(
         "feature_sh_nofork": "y",
         "feature_sh_standalone": "y",
 
+        # Hust extras:
+        "hush_echo": "y",
+        "hush_help": "y",
+        "hush_interactive": "y",
+        "hush_printf": "y",
+
         # Force NOMMU build.
         # Tells the build system that the target platform has no Memory
         # Management Unit (MMU). This causes the shell to use vfork() instead

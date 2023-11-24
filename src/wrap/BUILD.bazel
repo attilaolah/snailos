@@ -2,7 +2,12 @@ package(default_visibility = ["//pkg:__subpackages__"])
 
 cc_library(
     name = "wrap",
-    srcs = ["read.c"],
+    srcs = [
+        "read.c",
+        "vfork.c",
+        "wait4.c",
+        "waitpid.c",
+    ],
     target_compatible_with = ["@platforms//cpu:wasm32"],
 )
 

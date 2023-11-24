@@ -33,13 +33,8 @@ impl Terminal {
         fit_addon: Function,
         proc: &Rc<ProcessManager>,
     ) -> Result<Self, Error> {
-        let term: Rc<js::Terminal> = Rc::new(
-            Reflect::construct(
-                &terminal,
-                &Array::of1(&js::Builder::new().set("convertEol", false)?.into()),
-            )?
-            .into(),
-        );
+        let term: Rc<js::Terminal> =
+            Rc::new(Reflect::construct(&terminal, &Array::of1(&js::Builder::new().into()))?.into());
 
         let owner = Rc::new(RefCell::new(None)); // detached
         let callbacks = Callbacks::new(proc, &owner, &term);
@@ -117,26 +112,19 @@ impl Callbacks {
         pid: Rc<RefCell<Option<Pid>>>,
         term: Rc<js::Terminal>,
     ) -> Closure<dyn Fn(String)> {
-        Closure::new(move |text: String| {
-            if text == "\r" {
-                term.write_string("\r\n");
+        Closure::new(move |input: String| {
+            // Replace "\r" => "\n".
+            let text = if input == "\r" {
+                "\n".to_string()
             } else {
-                term.write_string(&text);
-            }
+                input
+            };
+            // Echo back everything.
+            term.write_string(&text);
 
             match *pid.borrow() {
                 None => js::warn("term: on_data: detached"),
                 Some(pid) => {
-                    if text == "\x04" {
-                        js::log("EOT receeived, closing input.");
-                        if let Err(err) = proc.stdin_close(pid) {
-                            js::log(&format!(
-                                "term: on_data: close error: {}",
-                                err.as_string().unwrap_or("n/a".to_string())
-                            ));
-                        }
-                        return;
-                    }
                     if let Err(err) = proc.stdin_write(pid, text.as_bytes().to_vec()) {
                         js::log(&format!(
                             "term: on_data: write error: {}",
