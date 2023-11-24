@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use js_sys::{Error, Reflect};
 use wasm_bindgen::JsValue;
 
@@ -19,21 +21,22 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 // /usr/wasm/cid.wasm is the WASM binary that it loads, where "cid" is the content ID.
 
 pub struct OS {
+    proc: Rc<ProcessManager>,
     term: Terminal,
-    proc: ProcessManager,
 }
 
 impl OS {
     pub fn new(config: JsValue) -> Result<Self, Error> {
         js::p_defer_init(Reflect::get(&config, &"pDefer".into())?.into());
 
-        Ok(Self {
-            proc: ProcessManager::new(),
-            term: Terminal::new(
-                Reflect::get(&config, &"Terminal".into())?.into(),
-                Reflect::get(&config, &"FitAddon".into())?.into(),
-            )?,
-        })
+        let proc = Rc::new(ProcessManager::new());
+        let term = Terminal::new(
+            Reflect::get(&config, &"Terminal".into())?.into(),
+            Reflect::get(&config, &"FitAddon".into())?.into(),
+            &proc,
+        )?;
+
+        Ok(Self { proc, term })
     }
 
     pub async fn boot(&mut self) -> Result<(), Error> {
@@ -44,6 +47,7 @@ impl OS {
         self.term.writeln(b"")?;
 
         let pid = self.proc.exec("/bin/busybox", &["hush"]).await?;
+        self.term.attach_to(pid);
 
         // TODO: Merge stdout and stderr!
         // For now, let's just display the output of stdout.

@@ -1,24 +1,27 @@
 use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc};
 
 use js_sys::{Error, Function, JsString, Object, Promise, Reflect};
-use wasm_bindgen::{closure::Closure, throw_val, JsValue};
+use wasm_bindgen::{closure::Closure, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use crate::{
-    async_io::{AsyncIo, STDERR, STDOUT},
+    async_io::{AsyncIo, STDERR, STDIN, STDOUT},
     binfs::BinFs,
     js,
 };
 
+pub type Pid = u32;
+
 pub struct ProcessManager {
-    cnt: u32,
-    map: HashMap<u32, Process>,
+    map: RefCell<HashMap<Pid, Rc<Process>>>,
+    next_pid: RefCell<Pid>,
     binfs: BinFs,
 }
 
 struct Process {
-    id: u32,
+    id: Pid,
     state: Rc<RefCell<State>>,
+    module: Rc<RefCell<Option<js::Module>>>,
     io: Rc<AsyncIo>,
     promise: Promise,
 
@@ -27,12 +30,12 @@ struct Process {
 }
 
 struct Callbacks {
-    set_module: Closure<dyn Fn(Object)>,
+    set_module: Closure<dyn Fn(js::Module)>,
     init_module: Closure<dyn Fn(Object, Object)>,
     init_runtime: Closure<dyn Fn()>,
     read: Closure<dyn Fn(i32, u32, u32) -> Promise>,
-    print: Closure<dyn Fn(JsString)>,
-    print_err: Closure<dyn Fn(JsString)>,
+    print: Closure<dyn Fn(String)>,
+    print_err: Closure<dyn Fn(String)>,
     exit: Closure<dyn FnMut(i32)>,
 }
 
@@ -44,26 +47,28 @@ pub enum State {
 impl ProcessManager {
     pub fn new() -> Self {
         Self {
-            cnt: 1,
-            map: HashMap::new(),
+            map: RefCell::new(HashMap::new()),
+            next_pid: RefCell::new(1),
             binfs: BinFs::new("/bin"),
         }
     }
 
     /// Executes the given binary file.
     /// Once the process has started, returns its pid.
-    pub async fn exec(&mut self, file_path: &str, args: &[&str]) -> Result<u32, Error> {
+    pub async fn exec(&self, file_path: &str, args: &[&str]) -> Result<Pid, Error> {
         let resolved_path = self
             .binfs
             .resolve(file_path)
             .ok_or(Error::new(&format!("failed to resolve: {}", file_path)))?;
 
-        let module = js::load_module(&resolved_path.to_string_lossy().to_string()).await?;
+        let ctor = js::load_module(&resolved_path.to_string_lossy().to_string()).await?;
 
-        let pid = self.next_pid();
+        let pid: Pid = *self.next_pid.borrow();
+        self.next_pid.replace(pid + 1);
+
         let p = Process::new(
             pid,
-            module,
+            ctor,
             &resolved_path
                 .file_stem()
                 .unwrap() // already validated above
@@ -72,46 +77,67 @@ impl ProcessManager {
             args,
         )?;
 
-        self.map.entry(pid).or_insert(p);
+        self.map.borrow_mut().insert(pid, Rc::new(p));
 
         Ok(pid)
     }
 
-    /// Waits until a process produces output on a file descriptor.
-    pub async fn wait_data(&self, pid: u32, fd: u32) -> Result<Option<Vec<Vec<u8>>>, Error> {
+    /// Writes data to the standard input of a process.
+    pub fn stdin_write(&self, pid: Pid, data: Vec<u8>) -> Result<usize, Error> {
         self.map
+            .borrow()
             .get(&pid)
             .ok_or(Error::new(&format!("no such process: {}", pid)))?
             .io
-            .read_all(fd)
-            .await
+            .write(STDIN, data)
+    }
+
+    /// Closes the the standard input of a process.
+    pub fn stdin_close(&self, pid: Pid) -> Result<(), Error> {
+        self.map
+            .borrow()
+            .get(&pid)
+            .ok_or(Error::new(&format!("no such process: {}", pid)))?
+            .io
+            .close(STDIN)
+    }
+
+    /// Waits until a process produces output on a file descriptor.
+    pub async fn wait_data(&self, pid: Pid, fd: u32) -> Result<Option<Vec<Vec<u8>>>, Error> {
+        {
+            self.map
+                .borrow()
+                .get(&pid)
+                .ok_or(Error::new(&format!("no such process: {}", pid)))?
+                .clone()
+        }
+        .io
+        .consume_all(fd)
+        .await
     }
 
     /// Waits until a process exits, returning its exit code.
-    pub async fn wait_quit(&mut self, pid: u32) -> Result<i32, Error> {
-        match self.map.get_mut(&pid) {
-            Some(p) => {
-                let exit_code = p.wait().await?;
-                self.map.remove(&pid);
-                Ok(exit_code)
-            }
-            None => Err(Error::new(&format!("no such process: {}", pid))),
-        }
-    }
-
-    fn next_pid(&mut self) -> u32 {
-        self.cnt += 1;
-        self.cnt
+    pub async fn wait_quit(&self, pid: Pid) -> Result<i32, Error> {
+        let proc = self
+            .map
+            .borrow()
+            .get(&pid)
+            .ok_or(Error::new(&format!("no such process: {}", pid)))?
+            .clone();
+        let exit_code = proc.wait().await?;
+        self.map.borrow_mut().remove(&pid);
+        Ok(exit_code)
     }
 }
 
 impl Process {
-    fn new(id: u32, module: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
+    fn new(id: Pid, ctor: Function, name: &str, arguments: &[&str]) -> Result<Self, Error> {
         let state = Rc::new(RefCell::new(State::Running(js::deferred()?)));
+        let module = Rc::new(RefCell::new(None));
         let io = Rc::new(AsyncIo::new()?);
 
-        let callbacks = Callbacks::new(&state, &io);
-        let promise: Promise = module
+        let callbacks = Callbacks::new(&state, &module, &io);
+        let promise: Promise = ctor
             .call1(
                 &JsValue::null(),
                 &js::Builder::new()
@@ -132,6 +158,7 @@ impl Process {
         Ok(Self {
             id,
             state,
+            module,
             io,
             promise,
             callbacks,
@@ -153,21 +180,25 @@ impl Process {
 }
 
 impl Callbacks {
-    fn new(state: &Rc<RefCell<State>>, io: &Rc<AsyncIo>) -> Self {
+    fn new(
+        state: &Rc<RefCell<State>>,
+        module: &Rc<RefCell<Option<js::Module>>>,
+        io: &Rc<AsyncIo>,
+    ) -> Self {
         Self {
-            set_module: Self::set_module(),
+            set_module: Self::set_module(module.clone()),
             init_module: Self::init_module(),
             init_runtime: Self::init_runtime(),
-            read: Self::read(io.clone()),
+            read: Self::read(module.clone(), io.clone()),
             print: Self::print(io.clone(), STDOUT),
             print_err: Self::print(io.clone(), STDERR),
             exit: Self::exit(state.clone(), io.clone()),
         }
     }
 
-    pub fn set_module() -> Closure<dyn Fn(Object)> {
-        Closure::new(move |_module: Object| {
-            // TODO: Set the module here!
+    pub fn set_module(module: Rc<RefCell<Option<js::Module>>>) -> Closure<dyn Fn(js::Module)> {
+        Closure::new(move |js_module: js::Module| {
+            module.replace(Some(js_module));
         })
     }
     pub fn init_module() -> Closure<dyn Fn(Object, Object)> {
@@ -192,27 +223,25 @@ impl Callbacks {
         Closure::new(move || {})
     }
 
-    pub fn read(_io: Rc<AsyncIo>) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
-        Closure::new(move |fd: i32, _buf: u32, _count: u32| -> Promise {
+    pub fn read(
+        module: Rc<RefCell<Option<js::Module>>>,
+        io: Rc<AsyncIo>,
+    ) -> Closure<dyn Fn(i32, u32, u32) -> Promise> {
+        Closure::new(move |fd: i32, buf: u32, count: u32| -> Promise {
+            // TODO: Remove this layer of indentation with if let/else.
             match u32::try_from(fd) {
-                Err(_) => Promise::new(&mut |res: Function, _: Function| {
-                    js::error(&format!("proc: fd {}: read failed", fd));
-                    if let Err(err) = res.call1(&JsValue::null(), &(-1).into()) {
-                        throw_val(err);
-                    }
-                }),
-                // TODO: Return io.promise_read().then(……)?
-                Ok(fd) => Promise::new(&mut |_res: Function, _: Function| {
-                    js::warn(&format!("proc: fd {}: read: not implemented", fd));
-                    // Never resolve.
-                }),
+                Err(_) => Promise::reject(&format!("proc: fd {}: bad file descriptor", fd).into()),
+                Ok(fd) => match io.read_promise(fd, &module, buf, count) {
+                    Err(_) => Promise::reject(&format!("proc: fd {}: read failed", fd).into()),
+                    Ok(promise) => promise,
+                },
             }
         })
     }
 
-    pub fn print(io: Rc<AsyncIo>, fd: u32) -> Closure<dyn Fn(JsString)> {
-        Closure::new(move |text: JsString| {
-            if let Err(_) = io.write_string(fd, text) {
+    pub fn print(io: Rc<AsyncIo>, fd: u32) -> Closure<dyn Fn(String)> {
+        Closure::new(move |text: String| {
+            if let Err(_) = io.write(fd, text.as_bytes().to_vec()) {
                 js::error(&format!("proc: fd {}: write failed", fd));
             }
         })

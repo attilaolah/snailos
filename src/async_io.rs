@@ -7,8 +7,7 @@ use std::{
     rc::Rc,
 };
 
-use js_sys::{Error, JsString, Promise};
-use wasm_bindgen::JsValue;
+use js_sys::{Error, Promise, Uint8Array};
 use wasm_bindgen_futures::JsFuture;
 
 use crate::js;
@@ -31,10 +30,18 @@ pub struct AsyncIo {
 struct AsyncBuffer {
     // Internal I/O buffer.
     buffer: RefCell<VecDeque<Vec<u8>>>,
+    // Target C-style buffer (pointer + length).
+    target: RefCell<Option<HeapView>>,
     // Deferred object, waiting for data to become available.
     deferred: RefCell<Option<js::Deferred>>,
     // Whether the file descriptor is open.
     closed: RefCell<bool>,
+}
+
+struct HeapView {
+    module: Rc<RefCell<Option<js::Module>>>,
+    offset: u32,
+    length: u32,
 }
 
 impl AsyncIo {
@@ -53,7 +60,7 @@ impl AsyncIo {
     /// Returns an error if the file descriptor is already open.
     pub fn open(&self, fd: u32) -> Result<(), Error> {
         match self.buffers.borrow_mut().entry(fd) {
-            Occupied(_) => Err(Error::new(&format!("open: fd {}: already open", fd))),
+            Occupied(_) => Err(Error::new(&format!("io: fd {}: open: already open", fd))),
             Vacant(v) => {
                 v.insert(AsyncBuffer::new().into());
                 Ok(())
@@ -66,32 +73,37 @@ impl AsyncIo {
     /// If there is data in the buffer, it will be returned immediately. Otherwise, if the producer
     /// side is still connected, this function will block until either data becomes available or
     /// the producer side disconnects. If the producer is disconnected and the queue is drained,
-    /// None is returned.
-    pub async fn read(&self, _fd: u32, _count: usize) -> Result<Option<Vec<u8>>, Error> {
-        todo!();
+    /// no data is returned (but the promise resolves immediately).
+    pub fn read_promise(
+        &self,
+        fd: u32,
+        module: &Rc<RefCell<Option<js::Module>>>,
+        offset: u32,
+        length: u32,
+    ) -> Result<Promise, Error> {
+        self.buffers
+            .borrow()
+            .get(&fd)
+            .ok_or(Error::new(&format!("io: fd {}: consume_all: not open", fd)))?
+            .read_promise(module, offset, length)
     }
 
-    /// Read all data from the file descriptor.
+    /// Consume all data from the file descriptor.
     ///
     /// This can be more efficient as the data is returned in chunks and no copy needs to be done.
-    pub async fn read_all(&self, fd: u32) -> Result<Option<Vec<Vec<u8>>>, Error> {
+    pub async fn consume_all(&self, fd: u32) -> Result<Option<Vec<Vec<u8>>>, Error> {
         {
-            self.buffers
-                .borrow() // returned before await
+            let buf = self
+                .buffers
+                .borrow()
                 .get(&fd)
-                .ok_or(Error::new(&format!("read_all: fd {}: not open", fd)))?
-                .clone()
+                .ok_or(Error::new(&format!("io: fd {}: consume_all: not open", fd)))?
+                .clone();
+            // Releasing the temporary .borrow() here.
+            buf
         }
-        .read_all()
+        .consume_all()
         .await
-    }
-
-    /// Read from the file descriptor.
-    ///
-    /// Similar to read(), but returns a promise that can be chained. The promise will resolve with
-    /// a Uint8Array when data is available, or with null indicating that the channel is closed.
-    pub fn read_promise(&self, _fd: u32, _count: usize) -> Result<Promise, Error> {
-        todo!();
     }
 
     /// Writes data to the file descriptor.
@@ -100,33 +112,19 @@ impl AsyncIo {
     ///
     /// If there is a consumer connected, some data might be delivered immediately, otherwise, the
     /// data is buffered.
-    pub fn write(&self, fd: u32, data: Vec<u8>) -> Result<u32, Error> {
+    pub fn write(&self, fd: u32, data: Vec<u8>) -> Result<usize, Error> {
         self.buffers
             .borrow()
             .get(&fd)
-            .ok_or(Error::new(&format!("write: fd {}: not open", fd)))?
+            .ok_or(Error::new(&format!("io: fd {}: write: not open", fd)))?
             .write(data)
-    }
-
-    /// Encodes the JS string and writes it to the file descriptor.
-    pub fn write_string(&self, fd: u32, data: JsString) -> Result<u32, Error> {
-        self.write(
-            fd,
-            data.as_string()
-                .ok_or(Error::new(&format!(
-                    "write_string: fd {}: invalid argument",
-                    fd
-                )))?
-                .as_bytes()
-                .to_vec(),
-        )
     }
 
     /// Closes the file descriptor, indicating that no more data can be sent.
     pub fn close(&self, fd: u32) -> Result<(), Error> {
         match self.buffers.borrow_mut().remove(&fd) {
             Some(buf) => Ok(buf.close()),
-            None => Err(Error::new(&format!("close: fd {}: not open", fd))),
+            None => Err(Error::new(&format!("io: fd {}: close: not open", fd))),
         }
     }
 
@@ -146,12 +144,53 @@ impl AsyncBuffer {
     fn new() -> Self {
         Self {
             buffer: RefCell::new(VecDeque::new()),
+            target: RefCell::new(None),
             deferred: RefCell::new(None),
             closed: RefCell::new(false),
         }
     }
 
-    /// Read all data from the buffer.
+    fn read_promise(
+        &self,
+        module: &Rc<RefCell<Option<js::Module>>>,
+        offset: u32,
+        length: u32,
+    ) -> Result<Promise, Error> {
+        if self.deferred.borrow().is_some() {
+            return Err(Error::new("io: read_promise: channel busy"));
+        }
+
+        // Indicate where to copy the data.
+        self.target.replace(Some(HeapView {
+            module: module.clone(),
+            offset,
+            length,
+        }));
+
+        if !self.buffer.borrow().is_empty() {
+            // Synchronous path: there is already data in the buffer.
+            let def = js::deferred()?;
+            let promise = def.promise();
+            self.deferred.replace(Some(def));
+            self.signal_write();
+            return Ok(promise);
+        }
+
+        if *self.closed.borrow() {
+            // The buffer is drained and the channel is closed.
+            // Indicate that there is no more data by returning zero bytes.
+            return Ok(Promise::resolve(&0.into()));
+        }
+
+        let def = js::deferred()?;
+        let promise = def.promise();
+        self.deferred.replace(Some(def));
+
+        // Asynchronous path: the promise will receive the signal when a write() happens.
+        Ok(promise)
+    }
+
+    /// Consume all data from the buffer.
     ///
     /// If there is data in the buffer, it will be returned immediately. Otherwise, if the producer
     /// side is still connected, this function will block until either data becomes available or
@@ -160,9 +199,9 @@ impl AsyncBuffer {
     ///
     /// This function may be more efficient than read() as the data is returned in chunks and no
     /// copy needs to be done.
-    async fn read_all(&self) -> Result<Option<Vec<Vec<u8>>>, Error> {
+    async fn consume_all(&self) -> Result<Option<Vec<Vec<u8>>>, Error> {
         if self.deferred.borrow().is_some() {
-            return Err(Error::new("channel busy (receiver already attached)"));
+            return Err(Error::new("io: consume_all: channel busy"));
         }
 
         if !self.buffer.borrow().is_empty() {
@@ -177,7 +216,9 @@ impl AsyncBuffer {
         }
 
         self.deferred.replace(Some(js::deferred()?));
-        self.wait_read().await?; // Wait for data.
+
+        // Wait for data. We have to make sure nothing is currently borrowed.
+        self.wait_read().await?;
 
         Ok(if !self.buffer.borrow().is_empty() {
             Some(self.buffer.borrow_mut().drain(..).collect())
@@ -193,24 +234,24 @@ impl AsyncBuffer {
     ///
     /// If there is a consumer connected, some data might be delivered immediately, otherwise, the
     /// data is buffered.
-    fn write(&self, data: Vec<u8>) -> Result<u32, Error> {
+    fn write(&self, data: Vec<u8>) -> Result<usize, Error> {
         if *self.closed.borrow() {
-            return Err(Error::new("stream closed"));
+            return Err(Error::new("io: write: stream closed"));
         }
 
-        let result = data.len() as u32;
+        let count = data.len();
+        // TODO: This borrow fails, someone is holding on to it?
         self.buffer.borrow_mut().push_back(data);
         self.signal_write();
 
-        Ok(result)
+        Ok(count)
     }
 
     /// Blocks until someone calls signal_write().
     async fn wait_read(&self) -> Result<(), Error> {
         if let Some(promise) = {
-            // Temporary borrow(), we need to release it before the await.
-            // Otherwise someone calling signal_write() would fail to replace() it.
             let opt = self.deferred.borrow().as_ref().map(|d| d.promise());
+            // Releasing the temporary .borrow() here.
             opt
         } {
             // Now that the borrow is returned, we can block safely.
@@ -223,12 +264,61 @@ impl AsyncBuffer {
     /// Unblocks anyone waiting in wait_read().
     fn signal_write(&self) {
         if let Some(def) = self.deferred.replace(None) {
-            def.resolve(&JsValue::null());
+            def.resolve(&self.copy_to_target().into());
         }
+    }
+
+    /// Copies bytes to the target buffer if there is one.
+    ///
+    /// This will also "consume" any bytes copied since there is no pending consume_all() if there
+    /// is a target buffer (because there can be only one consumer).
+    fn copy_to_target(&self) -> usize {
+        let mut copied = 0;
+        if let Some(target) = self.target.borrow().as_ref() {
+            let mut target_buf = target.buffer();
+            let mut buffer = self.buffer.borrow_mut();
+            while let Some(mut chunk) = buffer.pop_front() {
+                let length = target.length as usize;
+                if chunk.len() > length {
+                    // There is not enough space in the buffer to copy all the data.
+                    // Consume as much as we can, and put the rest back into the buffer.
+                    let (copy, remaining) = chunk.split_at_mut(length);
+                    target_buf.copy_from(copy);
+                    buffer.push_front(remaining.to_vec());
+                    copied = length;
+                    break;
+                }
+
+                // There is enough space in the buffer to copy the entire chunk.
+                target_buf.subarray(0, chunk.len() as u32).copy_from(&chunk);
+                copied += chunk.len();
+
+                if copied == length {
+                    break; // no more space left
+                }
+
+                // Subslice the array for the next iteration.
+                target_buf = target_buf.subarray(chunk.len() as u32, target_buf.length());
+            }
+        }
+
+        copied
     }
 
     fn close(&self) {
         self.closed.replace(true);
         self.signal_write();
+    }
+}
+
+impl HeapView {
+    fn buffer(&self) -> Uint8Array {
+        // TODO: Avoid the .unwrap()!
+        self.module
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .heap()
+            .subarray(self.offset, self.offset + self.length)
     }
 }

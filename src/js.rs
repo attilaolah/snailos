@@ -3,12 +3,18 @@ use std::cell::RefCell;
 use js_sys::{
     eval, Array, Error, Function, JsString, Object, Promise, Reflect, Uint8Array, JSON::stringify,
 };
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{closure::Closure, prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlElement;
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen]
+    pub type Module;
+
+    #[wasm_bindgen(method, getter, js_name=HEAPU8)]
+    pub fn heap(this: &Module) -> Uint8Array;
+
     #[wasm_bindgen]
     pub type Deferred;
 
@@ -42,18 +48,26 @@ extern "C" {
     #[wasm_bindgen(method, catch)]
     pub fn write(this: &Terminal, data: &Uint8Array) -> Result<(), JsValue>;
 
-    #[wasm_bindgen(method, catch, js_name = write)]
-    pub fn write_with_callback(
+    #[wasm_bindgen(method, js_name = write)]
+    pub fn write_string(this: &Terminal, data: &str);
+
+    #[wasm_bindgen(method, catch, js_name = onData)]
+    pub fn on_data(
         this: &Terminal,
-        data: &Uint8Array,
-        callback: Function,
-    ) -> Result<(), JsValue>;
+        callback: &Closure<dyn Fn(String)>,
+    ) -> Result<Disposable, JsValue>;
 
     #[wasm_bindgen]
     pub type FitAddon;
 
     #[wasm_bindgen(method, catch)]
     pub fn fit(this: &FitAddon) -> Result<(), JsValue>;
+
+    #[wasm_bindgen]
+    pub type Disposable;
+
+    #[wasm_bindgen(method, catch)]
+    pub fn dispose(this: &Disposable) -> Result<(), JsValue>;
 }
 
 thread_local! {
