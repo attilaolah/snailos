@@ -311,6 +311,7 @@ impl AsyncBuffer {
     }
 }
 
+// TODO: Move to js::Module!
 impl HeapView {
     fn buffer(&self) -> Uint8Array {
         // TODO: Avoid the .unwrap()!

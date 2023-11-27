@@ -40,10 +40,11 @@ struct Callbacks {
     init_runtime: Closure<dyn Fn()>,
 
     // Mocked syscalls & library functions:
-    read: Closure<dyn Fn(i32, u32, u32) -> Promise>, // -> ssize_t = usize
-    vfork: Closure<dyn Fn() -> Promise>,             // -> pid_t = u32
-    wait4: Closure<dyn Fn(u32, u32, i32, u32) -> Promise>, // -> pid_t = u32
+    vfork: Closure<dyn Fn() -> Promise>, // -> pid_t = u32
     waitpid: Closure<dyn Fn(u32, u32, i32) -> Promise>, // -> pid_t = u32
+    wait4: Closure<dyn Fn(u32, u32, i32, u32) -> Promise>, // -> pid_t = u32
+    read: Closure<dyn Fn(i32, u32, u32) -> Promise>, // -> ssize_t = usize
+    write: Closure<dyn Fn(i32, u32, u32) -> u32>,
 }
 
 pub enum State {
@@ -150,19 +151,22 @@ impl Process {
                 &js::Builder::new()
                     .set("thisProgram", name)?
                     .set("arguments", js::str_array(arguments))?
-                    .set("print", callbacks.print.as_ref())?
+                    //.set("print", callbacks.print.as_ref())?
                     // TODO: Connect to print_err. For now we do 2>&1.
-                    .set("printErr", callbacks.print.as_ref())?
+                    //.set("printErr", callbacks.print.as_ref())?
                     .set("exit", callbacks.exit.as_ref())?
                     // OS init:
                     .set("os.set_module", callbacks.set_module.as_ref())?
                     .set("os.init_module", callbacks.init_module.as_ref())?
                     .set("os.init_runtime", callbacks.init_runtime.as_ref())?
                     // Mocked syscalls & functions:
-                    .set("os.read", callbacks.read.as_ref())?
+                    .set("os.pid", 1)? // TODO: actual pid!
+                    .set("os.ppid", 1)? // TODO: actual ppid!
                     .set("os.vfork", callbacks.vfork.as_ref())?
-                    .set("os.wait4", callbacks.wait4.as_ref())?
                     .set("os.waitpid", callbacks.waitpid.as_ref())?
+                    .set("os.wait4", callbacks.wait4.as_ref())?
+                    .set("os.read", callbacks.read.as_ref())?
+                    .set("os.write", callbacks.write.as_ref())?
                     .into(),
             )?
             .into();
@@ -206,10 +210,11 @@ impl Callbacks {
             init_module: Self::init_module(),
             init_runtime: Self::init_runtime(),
 
-            read: Self::read(module.clone(), io.clone()),
             vfork: Self::vfork(),
-            wait4: Self::wait4(),
             waitpid: Self::waitpid(),
+            wait4: Self::wait4(),
+            read: Self::read(module.clone(), io.clone()),
+            write: Self::write(module.clone(), io.clone()),
         }
     }
 
@@ -261,6 +266,36 @@ impl Callbacks {
         Closure::new(move || {})
     }
 
+    pub fn vfork() -> Closure<dyn Fn() -> Promise> {
+        Closure::new(move || {
+            #[cfg(feature = "dbg")]
+            js::log("proc: vfork()?");
+
+            Promise::resolve(&1.into())
+        })
+    }
+
+    pub fn waitpid() -> Closure<dyn Fn(u32, u32, i32) -> Promise> {
+        Closure::new(move |pid, status, options| {
+            #[cfg(feature = "dbg")]
+            js::log(&format!("proc: waitpid({}, {}, {})?", pid, status, options));
+
+            Promise::resolve(&1.into())
+        })
+    }
+
+    pub fn wait4() -> Closure<dyn Fn(u32, u32, i32, u32) -> Promise> {
+        Closure::new(move |pid, status, options, rusage| {
+            #[cfg(feature = "dbg")]
+            js::log(&format!(
+                "proc: wait4({}, {}, {}, {})?",
+                pid, status, options, rusage
+            ));
+
+            Promise::resolve(&(-1).into())
+        })
+    }
+
     pub fn read(
         module: Rc<RefCell<Option<js::Module>>>,
         io: Rc<AsyncIo>,
@@ -271,39 +306,24 @@ impl Callbacks {
 
             // TODO: Remove this layer of indentation with if let/else.
             match u32::try_from(fd) {
-                Err(_) => Promise::reject(&format!("proc: fd {}: bad file descriptor", fd).into()),
+                Err(_) => Promise::reject(&format!("proc: read {}: bad file descriptor", fd).into()),
                 Ok(fd) => match io.read_promise(fd, &module, buf, count) {
-                    Err(_) => Promise::reject(&format!("proc: fd {}: read failed", fd).into()),
+                    Err(_) => Promise::reject(&format!("proc: read {}: failed", fd).into()),
                     Ok(promise) => promise,
                 },
             }
         })
     }
 
-    pub fn vfork() -> Closure<dyn Fn() -> Promise> {
-        Closure::new(move || {
+    pub fn write(
+        module: Rc<RefCell<Option<js::Module>>>,
+        io: Rc<AsyncIo>,
+    ) -> Closure<dyn Fn(i32, u32, u32) -> u32> {
+        Closure::new(move |fd: i32, buf: u32, count: u32| -> u32 {
             #[cfg(feature = "dbg")]
-            js::log("proc: vfork()?");
-
-            Promise::resolve(&1.into())
-        })
-    }
-
-    pub fn wait4() -> Closure<dyn Fn(u32, u32, i32, u32) -> Promise> {
-        Closure::new(move |pid, status, options, rusage| {
-            #[cfg(feature = "dbg")]
-            js::log(&format!("proc: wait4({}, {}, {}, {})?", pid, status, options, rusage));
-
-            Promise::resolve(&(-1).into())
-        })
-    }
-
-    pub fn waitpid() -> Closure<dyn Fn(u32, u32, i32) -> Promise> {
-        Closure::new(move |pid, status, options| {
-            #[cfg(feature = "dbg")]
-            js::log(&format!("proc: waitpid({}, {}, {})?", pid, status, options));
-
-            Promise::resolve(&1.into())
+            js::log(&format!("proc: write({}, {}, {})?", fd, buf, count));
+            // TODO: implement write!
+            return count;
         })
     }
 }

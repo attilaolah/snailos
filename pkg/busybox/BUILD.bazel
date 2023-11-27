@@ -43,11 +43,17 @@ EM_ARGS = {
         # Wrapped syscalls:
         "-L${EXT_BUILD_ROOT}/$(dirname $(execpath //src/wrap))",
         "-lwrap",
-        "-Wl,--wrap=__syscall_wait4",
-        "-Wl,--wrap=read",
-        #"-Wl,--wrap=vfork",
-        #"-Wl,--wrap=waitpid",
-
+    ] + [
+        "-Wl,--wrap={}".format(syscall)
+        for syscall in [
+            # keep sorted
+            "__syscall_wait4",
+            "getpid",
+            "getppid",
+            "read",
+            "write",
+        ]
+    ] + [
         # TODO: Enable the below in -c dbg builds only!
         "-sASSERTIONS",
     ])),
