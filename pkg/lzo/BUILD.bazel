@@ -2,7 +2,7 @@ load("//pkg:emscripten_foreign_cc.bzl", "cmake")
 load(":src.bzl", "VERSION")
 
 cmake(
-    name = "lzo.build",
+    name = "lzo.pkg",
     out_static_libs = [
         "liblzo{}.a".format(VERSION.split(".")[0]),
     ],

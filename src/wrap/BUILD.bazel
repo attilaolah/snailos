@@ -1,0 +1,17 @@
+package(default_visibility = ["//pkg:__subpackages__"])
+
+cc_library(
+    name = "wrap",
+    srcs = ["wrap.c"],
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+)
+
+filegroup(
+    name = "pre_js",
+    srcs = ["pre.js"],
+)
+
+filegroup(
+    name = "post_js",
+    srcs = ["post.js"],
+)

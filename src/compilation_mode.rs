@@ -1,5 +1,6 @@
-use js_sys::Error;
 use std::fmt;
+
+use js_sys::Error;
 
 pub enum CompilationMode {
     #[cfg(feature = "dbg")]
